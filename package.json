@@ -1,7 +1,7 @@
 {
   "name": "windows-performance-optimizer-suite",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Enterprise-grade Windows PowerShell and Batch automation scripts with live hardware telemetry, elevated UAC execution, and Universal Router Management.",
   "author": "Windows Performance Optimizer Suite",
   "type": "module",
@@ -13,8 +13,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "build:win": "npm run build && electron-builder --win",
-    "build:dir": "npm run build && electron-builder --dir"
+    "patch:ps": "node scripts/patch-powershell-generator.cjs",
+    "build:win": "npm run build && npm run patch:ps && electron-builder --win",
+    "build:dir": "npm run build && npm run patch:ps && electron-builder --dir"
   },
   "build": {
     "appId": "com.optimizer.suite",
