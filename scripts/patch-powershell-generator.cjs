@@ -6,6 +6,10 @@ const targets = [
   path.join(__dirname, '..', 'src', 'data', 'scriptGenerator.ts')
 ];
 
+const removeInteractivePause = (text) => text
+  .replace(/^[ \t]*Write-Host[ \t]+(?:\\)?["']Press any key to exit this optimization session\.\.\.(?:\\)?["'][^\r\n]*\r?\n/gim, '')
+  .replace(/\$Host\.UI\.RawUI\.ReadKey\(\s*(?:\\)?["']NoEcho,IncludeKeyDown(?:\\)?["']\s*\)\s*/g, '');
+
 for (const file of targets) {
   if (!fs.existsSync(file)) continue;
   let text = fs.readFileSync(file, 'utf8');
@@ -13,11 +17,7 @@ for (const file of targets) {
 
   // PowerShell variable names immediately followed by ':' must use ${Name}:.
   text = text.replaceAll('$Description:', '\\${Description}:');
-
-  // Remove interactive console pauses from generated scripts. Handle both
-  // normal TS source quotes and escaped quotes present in the bundled CJS.
-  text = text.replace(/^[ \t]*Write-Host[ \t]+["']Press any key to exit this optimization session\.\.\.["'][^\r\n]*\r?\n/gim, '');
-  text = text.replace(/\$Host\.UI\.RawUI\.ReadKey\(\s*(?:\\["'])?NoEcho,IncludeKeyDown(?:\\["'])?\s*\)\s*/g, '');
+  text = removeInteractivePause(text);
 
   if (text !== before) {
     fs.writeFileSync(file, text, 'utf8');
