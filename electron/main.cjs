@@ -1,9 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const os = require('os');
 const si = require('systeminformation');
 const { spawn, exec } = require('child_process');
-const sudo = require('sudo-prompt');
+const sudo = require('@vscode/sudo-prompt');
 const fs = require('fs');
 
 // Prevent multiple instances
@@ -101,54 +100,74 @@ if (!gotTheLock) {
     const { generatePowerShellScript } = require('./scriptGenerator.cjs');
 
     ipcMain.handle('run-optimization-task', async (event, taskId, config, elevate) => {
-      // Validate inputs
       const allowedTaskIds = ['full', 'temp', 'dns', 'browser', 'ram', 'update', 'router_config', 'cpu'];
       if (!allowedTaskIds.includes(taskId)) {
         return { success: false, exitCode: -1, error: 'Invalid Task ID' };
       }
 
-      // Generate the script using the shared script generator
       const script = generatePowerShellScript(config);
 
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const tempPath = path.join(app.getPath('temp'), `WinOpt_${Date.now()}.ps1`);
-        fs.writeFileSync(tempPath, script);
+        try {
+          fs.writeFileSync(tempPath, script, { encoding: 'utf8' });
+        } catch (writeError) {
+          resolve({ success: false, exitCode: -1, stdout: '', stderr: writeError.message });
+          return;
+        }
+
+        const cleanup = () => {
+          try { fs.unlinkSync(tempPath); } catch (_) {}
+        };
 
         if (elevate) {
-          const options = {
-            name: 'Windows Performance Optimizer Suite'
-          };
+          const options = { name: 'Windows Performance Optimizer Suite' };
           sudo.exec(`powershell.exe -ExecutionPolicy Bypass -NoProfile -File "${tempPath}"`, options, (error, stdout, stderr) => {
-            try { fs.unlinkSync(tempPath); } catch(e){}
+            cleanup();
+            const out = stdout?.toString() || '';
+            const errOut = stderr?.toString() || '';
             if (error) {
-              resolve({ success: false, exitCode: error.code || 1, stdout: stdout?.toString() || '', stderr: stderr?.toString() || error.message });
+              resolve({
+                success: false,
+                exitCode: typeof error.code === 'number' ? error.code : 1,
+                stdout: out,
+                stderr: errOut || error.message
+              });
             } else {
-              resolve({ success: true, exitCode: 0, stdout: stdout?.toString() || '', stderr: stderr?.toString() || '' });
+              resolve({ success: true, exitCode: 0, stdout: out, stderr: errOut });
             }
           });
         } else {
-          const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', tempPath]);
+          const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', tempPath], {
+            windowsHide: true
+          });
           let stdout = '';
           let stderr = '';
 
           ps.stdout.on('data', (data) => {
-            stdout += data.toString();
-            mainWindow.webContents.send('execution-progress', { type: 'stdout', data: data.toString() });
+            const chunk = data.toString();
+            stdout += chunk;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('execution-progress', { type: 'stdout', data: chunk });
+            }
           });
 
           ps.stderr.on('data', (data) => {
-            stderr += data.toString();
-            mainWindow.webContents.send('execution-progress', { type: 'stderr', data: data.toString() });
+            const chunk = data.toString();
+            stderr += chunk;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
+            }
           });
 
           ps.on('close', (code) => {
-            try { fs.unlinkSync(tempPath); } catch(e){}
-            resolve({ success: code === 0, exitCode: code, stdout, stderr });
+            cleanup();
+            resolve({ success: code === 0, exitCode: code ?? -1, stdout, stderr });
           });
-          
+
           ps.on('error', (err) => {
-             try { fs.unlinkSync(tempPath); } catch(e){}
-             resolve({ success: false, exitCode: -1, stdout, stderr: err.message });
+            cleanup();
+            resolve({ success: false, exitCode: -1, stdout, stderr: stderr || err.message });
           });
         }
       });
@@ -157,67 +176,56 @@ if (!gotTheLock) {
     ipcMain.handle('router-api', async (event, action, data) => {
       if (action === 'getGateway') {
         try {
-           const networkInterfaces = await si.networkInterfaces();
-           const gateway = await si.networkGatewayDefault();
-           return { success: true, gateway };
+          const gateway = await si.networkGatewayDefault();
+          return { success: true, gateway };
         } catch (e) {
-           return { success: false, error: e.message };
+          return { success: false, error: e.message };
         }
-      } else if (action === 'ping') {
-         return new Promise((resolve) => {
-            const { host, port, protocol, timeoutMs } = data;
-            const net = require('net');
-            const socket = new net.Socket();
-            let resolved = false;
-            
-            socket.setTimeout(timeoutMs);
-            socket.on('connect', () => {
-               if (!resolved) {
-                  resolved = true;
-                  socket.destroy();
-                  resolve({ success: true, reachable: true });
-               }
-            });
-            socket.on('timeout', () => {
-               if (!resolved) {
-                  resolved = true;
-                  socket.destroy();
-                  resolve({ success: true, reachable: false });
-               }
-            });
-            socket.on('error', (err) => {
-               if (!resolved) {
-                  resolved = true;
-                  resolve({ success: true, reachable: false });
-               }
-            });
-            socket.connect(port, host);
-         });
-      } else if (action === 'fetch') {
-         try {
-            const { url, options } = data;
-            const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-            // Let's use Node's native fetch (Node 18+)
-            const response = await globalThis.fetch(url, options);
-            const headers = {};
-            response.headers.forEach((value, key) => { headers[key] = value });
-            const text = await response.text();
-            
-            return {
-               success: true,
-               status: response.status,
-               statusText: response.statusText,
-               ok: response.ok,
-               headers,
-               body: text
-            };
-         } catch (e) {
-            return { success: false, error: e.message };
-         }
       }
+
+      if (action === 'ping') {
+        return new Promise((resolve) => {
+          const { host, port, timeoutMs } = data || {};
+          const net = require('net');
+          const socket = new net.Socket();
+          let resolved = false;
+          const finish = (result) => {
+            if (resolved) return;
+            resolved = true;
+            socket.destroy();
+            resolve(result);
+          };
+
+          socket.setTimeout(Number(timeoutMs) || 2000);
+          socket.on('connect', () => finish({ success: true, reachable: true }));
+          socket.on('timeout', () => finish({ success: true, reachable: false }));
+          socket.on('error', () => finish({ success: true, reachable: false }));
+          socket.connect(Number(port) || 80, host);
+        });
+      }
+
+      if (action === 'fetch') {
+        try {
+          const { url, options } = data || {};
+          const response = await globalThis.fetch(url, options);
+          const headers = {};
+          response.headers.forEach((value, key) => { headers[key] = value; });
+          const body = await response.text();
+          return {
+            success: true,
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            headers,
+            body
+          };
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+      }
+
       return { success: false, error: 'Unknown action' };
     });
-
   });
 
   app.on('window-all-closed', () => {
