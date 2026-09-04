@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const si = require('systeminformation');
-const { spawn, exec } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const sudo = require('@vscode/sudo-prompt');
 const fs = require('fs');
 
@@ -59,7 +59,20 @@ if (!gotTheLock) {
 
     ipcMain.handle('check-elevation', async () => {
       return new Promise((resolve) => {
-        exec('net session', (error) => resolve(error === null));
+        execFile('powershell.exe', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy', 'Bypass',
+          '-Command',
+          '[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent() | ForEach-Object { $_.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }'
+        ], { windowsHide: true }, (error, stdout) => {
+          if (error) {
+            console.error('PowerShell elevation check failed:', error);
+            resolve(false);
+            return;
+          }
+          resolve(String(stdout).trim().toLowerCase() === 'true');
+        });
       });
     });
 
