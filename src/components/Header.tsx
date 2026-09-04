@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Terminal, Activity, Download, FileCode, BookOpen, Router } from 'lucide-react';
 import { UpdateCenter } from './UpdateCenter';
 
@@ -13,6 +13,16 @@ export const Header: React.FC<HeaderProps> = ({
   onViewChange,
   onQuickDownload,
 }) => {
+  const [appVersion, setAppVersion] = useState('2.7.0');
+
+  useEffect(() => {
+    window.electronAPI?.getAppVersion?.()
+      .then((version) => {
+        if (version) setAppVersion(version);
+      })
+      .catch(() => undefined);
+  }, []);
+
   return (
     <header className="bg-[#0F1423]/95 backdrop-blur-md border-b border-[#1F293D] sticky top-0 z-30 font-sans">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
@@ -26,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Windows Performance & Network Suite
               </h1>
               <span className="px-2 py-0.5 rounded-full bg-[#082F49]/80 border border-[#0284C7]/40 text-[10px] font-semibold text-cyan-300">
-                v2.6 Enterprise
+                v{appVersion} Enterprise
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">
