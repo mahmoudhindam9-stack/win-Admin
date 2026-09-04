@@ -41,7 +41,7 @@ export const UpdateCenter: React.FC<UpdateCenterProps> = ({ compact = false }) =
           break;
         case 'downloaded':
           setState('downloaded');
-          setVersion(data.version || version);
+          setVersion((previous) => data.version || previous);
           setPercent(100);
           setMessage('Update downloaded. Restart to install it.');
           setOpen(true);
@@ -61,7 +61,7 @@ export const UpdateCenter: React.FC<UpdateCenterProps> = ({ compact = false }) =
     });
 
     return () => cleanup?.();
-  }, [version]);
+  }, []);
 
   const check = async () => {
     const api = window.electronAPI;
