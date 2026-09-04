@@ -1,7 +1,7 @@
 {
   "name": "windows-performance-optimizer-suite",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Enterprise-grade Windows PowerShell and Batch automation scripts with live hardware telemetry, elevated UAC execution, and Universal Router Management.",
   "author": "Windows Performance Optimizer Suite",
   "type": "module",
@@ -43,7 +43,6 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
-    "@vscode/sudo-prompt": "^9.3.2",
     "dotenv": "^17.2.3",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.546.0",
