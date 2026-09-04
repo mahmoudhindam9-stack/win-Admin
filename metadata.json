@@ -1,0 +1,6 @@
+{
+  "name": "Windows Performance Optimizer Suite",
+  "description": "Enterprise-grade Windows PowerShell and Batch automation scripts with live hardware telemetry, elevated UAC execution, and Universal Router Management for brand-agnostic Wi-Fi and gateway administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
