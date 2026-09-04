@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const si = require('systeminformation');
 const { spawn, execFile } = require('child_process');
-const sudo = require('@vscode/sudo-prompt');
 const fs = require('fs');
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -20,6 +19,7 @@ if (!gotTheLock) {
 
   let mainWindow;
   let updater = null;
+
   function createWindow() {
     mainWindow = new BrowserWindow({
       width: 1280,
@@ -42,6 +42,128 @@ if (!gotTheLock) {
     } else {
       mainWindow.loadURL('http://localhost:3000');
     }
+  }
+
+  function psQuote(value) {
+    return `'${String(value).replace(/'/g, "''")}'`;
+  }
+
+  function sanitizeGeneratedPowerShell(script) {
+    return String(script)
+      .replace(/\$Host\.UI\.RawUI\.ReadKey\(\s*["']NoEcho,IncludeKeyDown["']\s*\)\s*/g, '')
+      .replace(/^[ \t]*Write-Host\s+["']Press any key to exit this optimization session\.\.\.["'].*\r?\n/gim, '')
+      .replace(/\$Description:/g, '${Description}:')
+      .replace(/\\\$\{Description\}:/g, '${Description}:');
+  }
+
+  function waitForTextFiles(stdoutPath, stderrPath, mainWindow, processPromise) {
+    let stdoutOffset = 0;
+    let stderrOffset = 0;
+    const interval = setInterval(() => {
+      try {
+        if (fs.existsSync(stdoutPath)) {
+          const text = fs.readFileSync(stdoutPath, 'utf8');
+          if (text.length > stdoutOffset) {
+            const chunk = text.slice(stdoutOffset);
+            stdoutOffset = text.length;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('execution-progress', { type: 'stdout', data: chunk });
+            }
+          }
+        }
+        if (fs.existsSync(stderrPath)) {
+          const text = fs.readFileSync(stderrPath, 'utf8');
+          if (text.length > stderrOffset) {
+            const chunk = text.slice(stderrOffset);
+            stderrOffset = text.length;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
+            }
+          }
+        }
+      } catch (_) {}
+    }, 150);
+
+    return processPromise.finally(() => clearInterval(interval));
+  }
+
+  async function runElevatedPowerShell(scriptPath, taskId) {
+    const tempDir = path.dirname(scriptPath);
+    const token = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const wrapperPath = path.join(tempDir, `WinOptElevated_${token}.ps1`);
+    const stdoutPath = path.join(tempDir, `WinOptElevated_${token}.out.log`);
+    const stderrPath = path.join(tempDir, `WinOptElevated_${token}.err.log`);
+    const exitPath = path.join(tempDir, `WinOptElevated_${token}.exit`);
+
+    const wrapper = `
+$ErrorActionPreference = 'Continue'
+$exitCode = 1
+try {
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${psQuote(scriptPath)} 1> ${psQuote(stdoutPath)} 2> ${psQuote(stderrPath)}
+    $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
+} catch {
+    $_ | Out-File -FilePath ${psQuote(stderrPath)} -Append -Encoding utf8
+    $exitCode = 1
+}
+Set-Content -Path ${psQuote(exitPath)} -Value $exitCode -Encoding ascii
+exit $exitCode
+`;
+
+    try {
+      fs.writeFileSync(wrapperPath, wrapper, 'utf8');
+      fs.writeFileSync(stdoutPath, '', 'utf8');
+      fs.writeFileSync(stderrPath, '', 'utf8');
+      try { fs.unlinkSync(exitPath); } catch (_) {}
+    } catch (error) {
+      return { success: false, exitCode: -1, stdout: '', stderr: error.message };
+    }
+
+    const psCommand = [
+      `$argList = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${String(wrapperPath).replace(/"/g, '""')}"'`,
+      `$p = Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs -WindowStyle Hidden -Wait -PassThru`,
+      `exit $p.ExitCode`
+    ].join('; ');
+
+    const processPromise = new Promise((resolve) => {
+      const child = execFile('powershell.exe', [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-Command', psCommand
+      ], { windowsHide: true }, () => {
+        let stdout = '';
+        let stderr = '';
+        try { stdout = fs.readFileSync(stdoutPath, 'utf8'); } catch (_) {}
+        try { stderr = fs.readFileSync(stderrPath, 'utf8'); } catch (_) {}
+        let exitCode = child.exitCode;
+        try {
+          if (fs.existsSync(exitPath)) {
+            const raw = Number(fs.readFileSync(exitPath, 'utf8').trim());
+            if (Number.isFinite(raw)) exitCode = raw;
+          }
+        } catch (_) {}
+        resolve({
+          success: exitCode === 0,
+          exitCode: typeof exitCode === 'number' ? exitCode : 1,
+          stdout,
+          stderr
+        });
+      });
+
+      child.on('error', (error) => {
+        resolve({ success: false, exitCode: -1, stdout: '', stderr: error.message });
+      });
+    });
+
+    const result = await waitForTextFiles(stdoutPath, stderrPath, mainWindow, processPromise);
+
+    try { fs.unlinkSync(wrapperPath); } catch (_) {}
+    try { fs.unlinkSync(stdoutPath); } catch (_) {}
+    try { fs.unlinkSync(stderrPath); } catch (_) {}
+    try { fs.unlinkSync(exitPath); } catch (_) {}
+
+    return result;
   }
 
   app.whenReady().then(() => {
@@ -126,40 +248,29 @@ if (!gotTheLock) {
         return { success: false, exitCode: -1, error: 'Invalid Task ID' };
       }
 
-      const script = generatePowerShellScript(config);
+      const script = sanitizeGeneratedPowerShell(generatePowerShellScript(config));
+      const tempPath = path.join(app.getPath('temp'), `WinOpt_${Date.now()}.ps1`);
 
-      return new Promise((resolve) => {
-        const tempPath = path.join(app.getPath('temp'), `WinOpt_${Date.now()}.ps1`);
-        try {
-          fs.writeFileSync(tempPath, script, { encoding: 'utf8' });
-        } catch (writeError) {
-          resolve({ success: false, exitCode: -1, stdout: '', stderr: writeError.message });
-          return;
+      try {
+        fs.writeFileSync(tempPath, script, { encoding: 'utf8' });
+      } catch (writeError) {
+        return { success: false, exitCode: -1, stdout: '', stderr: writeError.message };
+      }
+
+      try {
+        if (elevate) {
+          return await runElevatedPowerShell(tempPath, taskId);
         }
 
-        const cleanup = () => {
-          try { fs.unlinkSync(tempPath); } catch (_) {}
-        };
+        return await new Promise((resolve) => {
+          const ps = spawn('powershell.exe', [
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', tempPath
+          ], { windowsHide: true });
 
-        if (elevate) {
-          const options = { name: 'Windows Performance Optimizer Suite' };
-          sudo.exec(`powershell.exe -ExecutionPolicy Bypass -NoProfile -File "${tempPath}"`, options, (error, stdout, stderr) => {
-            cleanup();
-            const out = stdout?.toString() || '';
-            const errOut = stderr?.toString() || '';
-            if (error) {
-              resolve({
-                success: false,
-                exitCode: typeof error.code === 'number' ? error.code : 1,
-                stdout: out,
-                stderr: errOut || error.message
-              });
-            } else {
-              resolve({ success: true, exitCode: 0, stdout: out, stderr: errOut });
-            }
-          });
-        } else {
-          const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', tempPath], { windowsHide: true });
           let stdout = '';
           let stderr = '';
 
@@ -174,15 +285,15 @@ if (!gotTheLock) {
             if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
           });
           ps.on('close', (code) => {
-            cleanup();
             resolve({ success: code === 0, exitCode: code ?? -1, stdout, stderr });
           });
           ps.on('error', (err) => {
-            cleanup();
             resolve({ success: false, exitCode: -1, stdout, stderr: stderr || err.message });
           });
-        }
-      });
+        });
+      } finally {
+        try { fs.unlinkSync(tempPath); } catch (_) {}
+      }
     });
 
     ipcMain.handle('router-api', async (event, action, data) => {
