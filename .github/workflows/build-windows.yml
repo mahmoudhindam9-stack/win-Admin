@@ -28,54 +28,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path buildResources | Out-Null
-
           @'
           <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-            <defs>
-              <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#0B0F19"/>
-                <stop offset="1" stop-color="#14233B"/>
-              </linearGradient>
-              <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#22D3EE"/>
-                <stop offset="1" stop-color="#2563EB"/>
-              </linearGradient>
-            </defs>
-            <rect width="1024" height="1024" rx="190" fill="url(#bg)"/>
-            <rect x="86" y="86" width="852" height="852" rx="150" fill="#0F172A" stroke="#1F3558" stroke-width="10"/>
+            <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B0F19"/><stop offset="1" stop-color="#14233B"/></linearGradient><linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22D3EE"/><stop offset="1" stop-color="#2563EB"/></linearGradient></defs>
+            <rect width="1024" height="1024" rx="190" fill="url(#bg)"/><rect x="86" y="86" width="852" height="852" rx="150" fill="#0F172A" stroke="#1F3558" stroke-width="10"/>
             <path d="M512 170 L780 270 V486 C780 676 665 798 512 858 C359 798 244 676 244 486 V270 Z" fill="none" stroke="url(#accent)" stroke-width="42"/>
-            <path d="M360 500 L455 595 L665 385" fill="none" stroke="#E2F3FF" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="512" cy="512" r="12" fill="#22D3EE"/>
+            <path d="M360 500 L455 595 L665 385" fill="none" stroke="#E2F3FF" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><circle cx="512" cy="512" r="12" fill="#22D3EE"/>
           </svg>
           '@ | Set-Content -Encoding UTF8 buildResources/icon.svg
-
-          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) {
-            choco install imagemagick -y --no-progress
-          }
-
+          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) { choco install imagemagick -y --no-progress }
           magick buildResources/icon.svg -background none -define icon:auto-resize=256,128,64,48,32,16 buildResources/icon.ico
-
           @'
-          <svg xmlns="http://www.w3.org/2000/svg" width="164" height="314" viewBox="0 0 164 314">
-            <defs>
-              <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#07101F"/>
-                <stop offset="1" stop-color="#12335B"/>
-              </linearGradient>
-            </defs>
-            <rect width="164" height="314" fill="url(#g)"/>
-            <circle cx="82" cy="72" r="38" fill="#0F172A" stroke="#22D3EE" stroke-width="5"/>
-            <path d="M62 72 L76 86 L105 57" fill="none" stroke="#E2F3FF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-            <text x="82" y="141" text-anchor="middle" fill="#E2F3FF" font-family="Segoe UI, Arial" font-size="14" font-weight="700">WINDOWS</text>
-            <text x="82" y="162" text-anchor="middle" fill="#E2F3FF" font-family="Segoe UI, Arial" font-size="14" font-weight="700">PERFORMANCE</text>
-            <text x="82" y="183" text-anchor="middle" fill="#E2F3FF" font-family="Segoe UI, Arial" font-size="14" font-weight="700">OPTIMIZER</text>
-            <text x="82" y="211" text-anchor="middle" fill="#67E8F9" font-family="Segoe UI, Arial" font-size="10">Secure • Live • Professional</text>
-            <rect x="22" y="244" width="120" height="1" fill="#2B4C73"/>
-            <text x="82" y="270" text-anchor="middle" fill="#94A3B8" font-family="Segoe UI, Arial" font-size="9">System maintenance</text>
-            <text x="82" y="285" text-anchor="middle" fill="#94A3B8" font-family="Segoe UI, Arial" font-size="9">and performance tools</text>
-          </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="164" height="314" viewBox="0 0 164 314"><rect width="164" height="314" fill="#07101F"/><text x="82" y="150" text-anchor="middle" fill="#E2F3FF" font-family="Segoe UI,Arial" font-size="13" font-weight="700">WINDOWS PERFORMANCE</text><text x="82" y="171" text-anchor="middle" fill="#E2F3FF" font-family="Segoe UI,Arial" font-size="13" font-weight="700">OPTIMIZER</text><text x="82" y="200" text-anchor="middle" fill="#67E8F9" font-family="Segoe UI,Arial" font-size="10">Secure • Live • Professional</text></svg>
           '@ | Set-Content -Encoding UTF8 buildResources/installerSidebar.svg
-
           magick buildResources/installerSidebar.svg -resize 164x314! buildResources/installerSidebar.bmp
 
       - name: Install dependencies
@@ -95,8 +60,6 @@ jobs:
         run: |
           $setup = Get-ChildItem release -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstaller' }
           if (-not $setup) { throw 'Setup.exe was not produced.' }
-          $uninstaller = Get-ChildItem release -Filter '*.exe' | Where-Object { $_.Name -match 'uninstaller' }
-          if (-not $uninstaller) { Write-Host 'Uninstaller is generated by NSIS at install time.' }
           Get-ChildItem release | Format-Table Name, Length
 
       - name: Upload installer artifact
@@ -111,5 +74,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: release/*
           generate_release_notes: true
