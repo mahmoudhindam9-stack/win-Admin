@@ -173,7 +173,6 @@ exit $exitCode
       try {
         const { initUpdater } = require('./updater.cjs');
         updater = initUpdater(mainWindow);
-        setTimeout(() => { updater?.check(); }, 5000);
       } catch (error) {
         console.error('Updater initialization failed:', error);
       }
