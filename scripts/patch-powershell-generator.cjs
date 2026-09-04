@@ -11,10 +11,12 @@ for (const file of targets) {
   let text = fs.readFileSync(file, 'utf8');
   const before = text;
 
-  // PowerShell interprets $Description: as a scoped/drive variable reference.
-  text = text.replaceAll('$Description:', '${Description}:');
+  // PowerShell interprets $Description: as a variable/drive reference.
+  // These generators are JavaScript template literals, so ${Description}
+  // must be escaped in the JS source as \${Description}.
+  text = text.replaceAll('$Description:', '\\${Description}:');
 
-  // The GUI runs scripts non-interactively; waiting for a key can break parsing/execution.
+  // The GUI executes scripts non-interactively; ReadKey can block or fail.
   text = text.replace(/^[ \t]*\$null = \$Host\.UI\.RawUI\.ReadKey\("NoEcho,IncludeKeyDown"\)[ \t]*\r?\n?/gm, '');
 
   if (text !== before) {
@@ -25,10 +27,15 @@ for (const file of targets) {
 
 const runtimeFile = path.join(__dirname, '..', 'electron', 'scriptGenerator.cjs');
 const runtime = fs.existsSync(runtimeFile) ? fs.readFileSync(runtimeFile, 'utf8') : '';
+
 if (runtime.includes('$Description:')) {
   throw new Error('PowerShell generator patch verification failed: $Description: still present.');
 }
 if (runtime.includes('$Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")')) {
   throw new Error('PowerShell generator patch verification failed: ReadKey still present.');
 }
+if (!runtime.includes('\\${Description}:')) {
+  throw new Error('PowerShell generator patch verification failed: escaped ${Description}: not present in generator source.');
+}
+
 console.log('PowerShell generator patch verification passed.');
