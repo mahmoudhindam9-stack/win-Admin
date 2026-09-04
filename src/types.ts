@@ -44,12 +44,12 @@ export interface HardwareMetrics {
   cpuClockSpeedGhz: number;
   cpuThreads: number;
   cpuProcesses: number;
-  cpuHistory: number[]; // Last 20 data points
+  cpuHistory: number[];
   ramUsedGB: number;
   ramTotalGB: number;
   ramStandbyGB: number;
   ramPercent: number;
-  ramHistory: number[]; // Last 20 data points
+  ramHistory: number[];
   driveUsedGB: number;
   driveTotalGB: number;
   topProcesses: { name: string; pid: number; cpuPercent: number; memMB: number }[];
@@ -91,6 +91,18 @@ export interface ExecutionSummary {
   rebootRecommended: boolean;
 }
 
+type UpdateStatusCallback = (data: {
+  type: 'checking' | 'available' | 'progress' | 'downloaded' | 'not-available' | 'error';
+  version?: string;
+  releaseDate?: string | null;
+  releaseName?: string | null;
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  bytesPerSecond?: number;
+  message?: string;
+}) => void;
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -99,7 +111,13 @@ declare global {
       runOptimizationTask: (taskId: OptimizationTaskId, config: ScriptConfig, elevate: boolean) => Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string; error?: string }>;
       onExecutionProgress: (callback: (data: { type: 'stdout' | 'stderr'; data: string }) => void) => () => void;
       routerApi: (action: string, data?: any) => Promise<any>;
+      checkForUpdate: () => Promise<{ success: boolean; reason?: string; error?: string; updateInfo?: { version?: string } | null }>;
+      downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
+      installUpdate: () => Promise<{ success: boolean; reason?: string; error?: string }>;
+      getAppVersion: () => Promise<string>;
+      onUpdateStatus: (callback: UpdateStatusCallback) => () => void;
     };
   }
 }
 
+export {};
