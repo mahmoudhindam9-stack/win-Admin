@@ -25,7 +25,6 @@
     "win": { "target": "nsis", "icon": "buildResources/icon.ico" },
     "nsis": {
       "oneClick": false,
-      "oneClick": false,
       "perMachine": false,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
