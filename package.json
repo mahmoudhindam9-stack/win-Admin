@@ -1,7 +1,7 @@
 {
   "name": "windows-performance-optimizer-suite",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Enterprise-grade Windows PowerShell and Batch automation scripts with live hardware telemetry, elevated UAC execution, and Universal Router Management.",
   "author": "Windows Performance Optimizer Suite",
   "type": "module",
@@ -19,17 +19,9 @@
   "build": {
     "appId": "com.optimizer.suite",
     "productName": "Windows Performance Optimizer Suite",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "buildResources/icon.ico"
-    },
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "electron/**/*"],
+    "win": { "target": "nsis", "icon": "buildResources/icon.ico" },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -44,13 +36,15 @@
       "uninstallerIcon": "buildResources/icon.ico",
       "installerSidebar": "buildResources/installerSidebar.bmp",
       "uninstallerSidebar": "buildResources/installerSidebar.bmp"
-    }
+    },
+    "publish": [{ "provider": "github", "owner": "mahmoudhindam9-stack", "repo": "win-Admin", "releaseType": "release" }]
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vscode/sudo-prompt": "^9.3.2",
     "dotenv": "^17.2.3",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
