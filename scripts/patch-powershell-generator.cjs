@@ -6,21 +6,19 @@ const targets = [
   path.join(__dirname, '..', 'src', 'data', 'scriptGenerator.ts')
 ];
 
-const removeInteractivePause = (text) => text
-  .replace(/^[ \t]*Write-Host[ \t]+(?:\\)?["']Press any key to exit this optimization session\.\.\.(?:\\)?["'][^\r\n]*\r?\n/gim, '')
-  .replace(/\$Host\.UI\.RawUI\.ReadKey\(\s*(?:\\)?["']NoEcho,IncludeKeyDown(?:\\)?["']\s*\)\s*/g, '');
+const sanitize = (text) => String(text)
+  // PowerShell variable names immediately followed by ':' must use ${Name}:.
+  .replaceAll('$Description:', '\\${Description}:')
+  // Remove any interactive pause line regardless of escaped JS quoting.
+  .replace(/^[^\r\n]*Press any key to exit this optimization session[^\r\n]*\r?\n?/gim, '')
+  .replace(/^[^\r\n]*\$Host\.UI\.RawUI\.ReadKey\([^\r\n]*\r?\n?/gm, '');
 
 for (const file of targets) {
   if (!fs.existsSync(file)) continue;
-  let text = fs.readFileSync(file, 'utf8');
-  const before = text;
-
-  // PowerShell variable names immediately followed by ':' must use ${Name}:.
-  text = text.replaceAll('$Description:', '\\${Description}:');
-  text = removeInteractivePause(text);
-
-  if (text !== before) {
-    fs.writeFileSync(file, text, 'utf8');
+  const before = fs.readFileSync(file, 'utf8');
+  const after = sanitize(before);
+  if (after !== before) {
+    fs.writeFileSync(file, after, 'utf8');
     console.log(`Patched PowerShell generator: ${path.relative(process.cwd(), file)}`);
   }
 }
