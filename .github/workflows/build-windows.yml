@@ -43,6 +43,39 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Building Windows Performance Optimizer Suite v$version"
 
+      - name: Determine whether this commit is a release
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $shouldRelease = $false
+
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $shouldRelease = $true
+          } elseif ('${{ github.ref }}' -eq 'refs/heads/main') {
+            try {
+              $previousJson = git show HEAD^:package.json | ConvertFrom-Json
+              if ($previousJson.version -ne $version) {
+                $shouldRelease = $true
+              }
+            } catch {
+              Write-Host 'No previous package.json found; treating this as non-release.'
+            }
+          }
+
+          if ($shouldRelease) {
+            gh release view "v$version" --repo mahmoudhindam9-stack/win-Admin 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Release v$version already exists; build will not publish a duplicate."
+              $shouldRelease = $false
+            }
+          }
+
+          "should_release=$($shouldRelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "should_release=$shouldRelease"
+
       - name: Generate branded installer artwork
         shell: pwsh
         run: |
@@ -69,7 +102,9 @@ jobs:
         run: npm run lint
 
       - name: Build Windows NSIS installer and updater metadata
-        run: npm run build:win
+        run: |
+          if (Test-Path release) { Remove-Item release -Recurse -Force }
+          npm run build:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,10 +112,10 @@ jobs:
       - name: Verify end-user update package
         shell: pwsh
         run: |
-          $setup = Get-ChildItem release -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstaller' }
-          if (-not $setup) { throw 'End-user Setup.exe was not produced.' }
-          if (-not (Get-ChildItem release -Filter '*.yml')) { throw 'Updater metadata (*.yml) was not produced.' }
-          if (-not (Get-ChildItem release -Filter '*.blockmap')) { throw 'Updater blockmap was not produced.' }
+          $setups = Get-ChildItem release -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstaller' }
+          if (-not $setups) { throw 'End-user Setup.exe was not produced.' }
+          if (@(Get-ChildItem release -Filter '*.yml').Count -eq 0) { throw 'Updater metadata (*.yml) was not produced.' }
+          if (@(Get-ChildItem release -Filter '*.blockmap').Count -eq 0) { throw 'Updater blockmap was not produced.' }
           Get-ChildItem release | Format-Table Name, Length
 
       - name: Upload final end-user update package
@@ -94,8 +129,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release for version bump or version tag
-        if: github.ref_type == 'tag' || startsWith(github.event.head_commit.message, 'release:')
+      - name: Publish GitHub Release for current application version
+        if: steps.release.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
