@@ -5,7 +5,6 @@ const { spawn, exec } = require('child_process');
 const sudo = require('@vscode/sudo-prompt');
 const fs = require('fs');
 
-// Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -20,6 +19,7 @@ if (!gotTheLock) {
   });
 
   let mainWindow;
+  let updater = null;
   function createWindow() {
     mainWindow = new BrowserWindow({
       width: 1280,
@@ -47,11 +47,19 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow();
 
+    if (app.isPackaged) {
+      try {
+        const { initUpdater } = require('./updater.cjs');
+        updater = initUpdater(mainWindow);
+        setTimeout(() => { updater?.check(); }, 5000);
+      } catch (error) {
+        console.error('Updater initialization failed:', error);
+      }
+    }
+
     ipcMain.handle('check-elevation', async () => {
       return new Promise((resolve) => {
-        exec('net session', (error) => {
-          resolve(error === null);
-        });
+        exec('net session', (error) => resolve(error === null));
       });
     });
 
@@ -138,33 +146,24 @@ if (!gotTheLock) {
             }
           });
         } else {
-          const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', tempPath], {
-            windowsHide: true
-          });
+          const ps = spawn('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', tempPath], { windowsHide: true });
           let stdout = '';
           let stderr = '';
 
           ps.stdout.on('data', (data) => {
             const chunk = data.toString();
             stdout += chunk;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('execution-progress', { type: 'stdout', data: chunk });
-            }
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-progress', { type: 'stdout', data: chunk });
           });
-
           ps.stderr.on('data', (data) => {
             const chunk = data.toString();
             stderr += chunk;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
-            }
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
           });
-
           ps.on('close', (code) => {
             cleanup();
             resolve({ success: code === 0, exitCode: code ?? -1, stdout, stderr });
           });
-
           ps.on('error', (err) => {
             cleanup();
             resolve({ success: false, exitCode: -1, stdout, stderr: stderr || err.message });
@@ -182,7 +181,6 @@ if (!gotTheLock) {
           return { success: false, error: e.message };
         }
       }
-
       if (action === 'ping') {
         return new Promise((resolve) => {
           const { host, port, timeoutMs } = data || {};
@@ -195,7 +193,6 @@ if (!gotTheLock) {
             socket.destroy();
             resolve(result);
           };
-
           socket.setTimeout(Number(timeoutMs) || 2000);
           socket.on('connect', () => finish({ success: true, reachable: true }));
           socket.on('timeout', () => finish({ success: true, reachable: false }));
@@ -203,7 +200,6 @@ if (!gotTheLock) {
           socket.connect(Number(port) || 80, host);
         });
       }
-
       if (action === 'fetch') {
         try {
           const { url, options } = data || {};
@@ -211,32 +207,25 @@ if (!gotTheLock) {
           const headers = {};
           response.headers.forEach((value, key) => { headers[key] = value; });
           const body = await response.text();
-          return {
-            success: true,
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-            headers,
-            body
-          };
+          return { success: true, status: response.status, statusText: response.statusText, ok: response.ok, headers, body };
         } catch (e) {
           return { success: false, error: e.message };
         }
       }
-
       return { success: false, error: 'Unknown action' };
     });
+
+    ipcMain.handle('update-check', async () => updater?.check() || { success: false, reason: 'unavailable' });
+    ipcMain.handle('update-download', async () => updater?.download() || { success: false, reason: 'unavailable' });
+    ipcMain.handle('update-install', async () => updater?.install() || { success: false, reason: 'unavailable' });
+    ipcMain.handle('app-version', () => app.getVersion());
   });
 
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      app.quit();
-    }
+    if (process.platform !== 'darwin') app.quit();
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 }
