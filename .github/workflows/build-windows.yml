@@ -62,11 +62,42 @@ jobs:
           if (-not $setup) { throw 'Setup.exe was not produced.' }
           Get-ChildItem release | Format-Table Name, Length
 
+      - name: Build developer update patch artifact
+        shell: pwsh
+        run: |
+          $patchRoot = Join-Path $env:RUNNER_TEMP 'WinOptPatch'
+          New-Item -ItemType Directory -Force -Path $patchRoot | Out-Null
+          $files = @(
+            'electron/scriptGenerator.cjs',
+            'src/data/scriptGenerator.ts',
+            'scripts/patch-powershell-generator.cjs',
+            'electron/main.cjs',
+            'electron/preload.cjs',
+            'electron/updater.cjs',
+            'package.json'
+          )
+          foreach ($file in $files) {
+            if (Test-Path $file) {
+              $dest = Join-Path $patchRoot $file
+              New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+              Copy-Item $file $dest -Force
+            }
+          }
+          Compress-Archive -Path (Join-Path $patchRoot '*') -DestinationPath (Join-Path $env:GITHUB_WORKSPACE 'release/Windows-Performance-Optimizer-Suite-v1.0.3-source-patch.zip') -Force
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: Windows-Performance-Optimizer-Suite-Windows
           path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload update patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Performance-Optimizer-Suite-Update-v1.0.3
+          path: release/Windows-Performance-Optimizer-Suite-v1.0.3-source-patch.zip
           if-no-files-found: error
           retention-days: 14
 
