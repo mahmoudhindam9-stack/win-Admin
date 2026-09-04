@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG: ScriptConfig = {
   cleanBraveCache: true,
   restartPerformanceServices: true,
   adjustVisualEffects: true,
+  optimizeCPU: true,
   visualEffectsPreset: 'balanced',
   createRestorePoint: true,
   dryRunMode: false,

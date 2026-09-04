@@ -40,28 +40,6 @@ export class MikroTikAdapter extends BaseRouterAdapter {
     'WPA2/WPA3-Personal',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'MikroTik-2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 6,
-      channelWidth: '20MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'MikroTik-5G',
-      password: '',
-      securityMode: 'WPA3-SAE',
-      channel: 36,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -167,7 +145,6 @@ export class MikroTikAdapter extends BaseRouterAdapter {
                channel: 'auto',
                channelWidth: '20MHz',
                hidden: false,
-               txPower: '100%',
              },
              band50: {
                enabled: true,
@@ -177,7 +154,6 @@ export class MikroTikAdapter extends BaseRouterAdapter {
                channel: 'auto',
                channelWidth: '80MHz',
                hidden: false,
-               txPower: '100%',
              },
              lastRetrieved: new Date().toLocaleTimeString(),
            }

@@ -40,35 +40,6 @@ export class NetgearAdapter extends BaseRouterAdapter {
     'WPA-PSK',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'NETGEAR-2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 'auto',
-      channelWidth: '40MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'NETGEAR-5G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 44,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    guestNetwork: {
-      enabled: false,
-      ssid: 'NETGEAR-Guest',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      isolateClients: true,
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -125,18 +96,7 @@ export class NetgearAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    const user = credentials.username || 'admin';
-    const pass = credentials.password || '';
-
-    if (!pass) {
-      return { success: false, error: 'Please enter the Netgear admin password.' };
-    }
-
-    const authStr = btoa(`${user}:${pass}`);
-    return {
-      success: true,
-      sessionToken: authStr,
-    };
+    return { success: false, error: 'UNSUPPORTED: Netgear specific SOAP API protocol implementation is missing.' };
   }
 
   async fetchWirelessConfig(
@@ -148,13 +108,7 @@ export class NetgearAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    return { success: false, error: 'UNSUPPORTED: Cannot fetch configuration reliably.' };
   }
 
   async applyWirelessConfig(
@@ -167,29 +121,7 @@ export class NetgearAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-    if (updates.guestNetwork) {
-      this.activeConfigCache.guestNetwork = {
-        ...this.activeConfigCache.guestNetwork!,
-        ...updates.guestNetwork,
-      };
-    }
-
-    return {
-      success: true,
-      rebootRequired: false,
-    };
+    return { success: false, error: 'UNSUPPORTED: Cannot apply configuration reliably.' };
   }
 
   generateDirectScript(

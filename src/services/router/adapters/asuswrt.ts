@@ -43,35 +43,6 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
     'Open',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'ASUS_2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 'auto',
-      channelWidth: '40MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'ASUS_5G',
-      password: '',
-      securityMode: 'WPA2/WPA3-Personal',
-      channel: 149,
-      channelWidth: '160MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    guestNetwork: {
-      enabled: false,
-      ssid: 'ASUS_Guest',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      isolateClients: true,
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -188,7 +159,6 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
                channel: 'auto',
                channelWidth: '40MHz',
                hidden: false,
-               txPower: '100%',
              },
              band50: {
                enabled: true,
@@ -198,7 +168,6 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
                channel: 'auto',
                channelWidth: '80MHz',
                hidden: false,
-               txPower: '100%',
              },
              lastRetrieved: new Date().toLocaleTimeString(),
           }

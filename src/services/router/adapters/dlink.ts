@@ -39,28 +39,6 @@ export class DLinkAdapter extends BaseRouterAdapter {
     'WPA-PSK',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'dlink-2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 6,
-      channelWidth: '20MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'dlink-5G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 36,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -111,15 +89,7 @@ export class DLinkAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    const pass = credentials.password || '';
-    if (!pass) {
-      return { success: false, error: 'Please provide the D-Link administrator password.' };
-    }
-
-    return {
-      success: true,
-      sessionToken: `hnap_token_${Math.random().toString(36).substring(2, 10)}`,
-    };
+    return { success: false, error: 'UNSUPPORTED: D-Link specific HNAP/SOAP API protocol implementation is missing.' };
   }
 
   async fetchWirelessConfig(
@@ -131,13 +101,7 @@ export class DLinkAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    return { success: false, error: 'UNSUPPORTED: Cannot fetch configuration reliably.' };
   }
 
   async applyWirelessConfig(
@@ -150,23 +114,7 @@ export class DLinkAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-
-    return {
-      success: true,
-      rebootRequired: false,
-    };
+    return { success: false, error: 'UNSUPPORTED: Cannot apply configuration reliably.' };
   }
 
   generateDirectScript(

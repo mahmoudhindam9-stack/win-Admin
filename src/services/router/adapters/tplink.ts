@@ -41,35 +41,6 @@ export class TPLinkAdapter extends BaseRouterAdapter {
     'WPA-PSK',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'TP-Link_2.4G_Ext',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 'auto',
-      channelWidth: '40MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'TP-Link_5G_Ext',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 44,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    guestNetwork: {
-      enabled: false,
-      ssid: 'TP-Link_Guest',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      isolateClients: true,
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -181,7 +152,6 @@ export class TPLinkAdapter extends BaseRouterAdapter {
                channel: 'auto',
                channelWidth: '40MHz',
                hidden: false,
-               txPower: '100%',
              },
              band50: {
                enabled: true,
@@ -191,7 +161,6 @@ export class TPLinkAdapter extends BaseRouterAdapter {
                channel: 44,
                channelWidth: '80MHz',
                hidden: false,
-               txPower: '100%',
              },
              lastRetrieved: new Date().toLocaleTimeString(),
            }

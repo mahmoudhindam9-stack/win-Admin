@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Cpu,
   Layers,
@@ -129,6 +129,61 @@ export const AdminMonitoringDashboard: React.FC<AdminMonitoringDashboardProps> =
   onOpenReportModal,
   onOpenRouterView,
 }) => {
+  const [taskState, setTaskState] = useState<Record<string, 'ready' | 'running' | 'success' | 'failed'>>({
+    cpu: 'ready',
+    ram: 'ready',
+    disk: 'ready',
+  });
+
+  const handleInlineTask = async (cardId: 'cpu' | 'ram' | 'disk', taskId: OptimizationTaskId) => {
+    if (!window.electronAPI || isExecuting || taskState[cardId] === 'running') return;
+    setTaskState(prev => ({ ...prev, [cardId]: 'running' }));
+    
+    // Create specific config for this task
+    const inlineConfig = {
+      cleanTempFiles: false,
+      emptyRecycleBin: false,
+      cleanPrefetch: false,
+      cleanWindowsUpdateCache: false,
+      cleanDeliveryOptimization: false,
+      flushDnsCache: false,
+      resetWinsockAndTcpIp: false,
+      cleanChromeCache: false,
+      cleanEdgeCache: false,
+      cleanFirefoxCache: false,
+      cleanBraveCache: false,
+      restartPerformanceServices: false,
+      adjustVisualEffects: false,
+      optimizeCPU: false,
+      visualEffectsPreset: 'balanced' as const,
+      createRestorePoint: false,
+      dryRunMode: false,
+      logToFile: false
+    };
+    
+    if (cardId === 'cpu') {
+      inlineConfig.optimizeCPU = true;
+    } else if (cardId === 'ram') {
+      inlineConfig.restartPerformanceServices = true;
+    } else if (cardId === 'disk') {
+      inlineConfig.cleanTempFiles = true;
+      inlineConfig.emptyRecycleBin = true;
+    }
+
+    try {
+      const result = await window.electronAPI.runOptimizationTask(taskId, inlineConfig, true);
+      if (result.success) {
+        setTaskState(prev => ({ ...prev, [cardId]: 'success' }));
+      } else {
+        setTaskState(prev => ({ ...prev, [cardId]: 'failed' }));
+      }
+      setTimeout(() => setTaskState(prev => ({ ...prev, [cardId]: 'ready' })), 4000);
+    } catch (e) {
+      setTaskState(prev => ({ ...prev, [cardId]: 'failed' }));
+      setTimeout(() => setTaskState(prev => ({ ...prev, [cardId]: 'ready' })), 4000);
+    }
+  };
+
   // Sparkline helper
   const renderSparkline = (data: number[], maxVal = 100, strokeColor = '#0284C7', fillColor = 'rgba(2, 132, 199, 0.15)') => {
     const width = 240;
@@ -232,236 +287,268 @@ export const AdminMonitoringDashboard: React.FC<AdminMonitoringDashboardProps> =
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* CARD 1: CPU (PROCESSOR) MONITOR */}
-          <div className="bg-[#161B2A] border border-[#1F293D] rounded-xl p-5 shadow-xl flex flex-col justify-between relative overflow-hidden">
-            <div className="flex items-center justify-between pb-3 border-b border-[#1F293D]">
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                  <Cpu className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                    CPU (Processor)
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 relative">
+          {/* Subtle background glow behind the cards */}
+          <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/5 via-emerald-500/5 to-purple-500/5 blur-3xl -z-10 rounded-3xl" />
+
+          {/* CARD 1: CPU */}
+          <div className="group relative bg-gradient-to-b from-[#0F172A]/90 to-[#0B1121]/90 backdrop-blur-md rounded-2xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden border border-slate-800/60 hover:border-cyan-900/50 transition-all duration-500">
+            {/* Ambient Top Glow */}
+            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+            
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-full bg-cyan-950/40 flex items-center justify-center text-cyan-400 shadow-inner border border-cyan-800/30">
+                    <Cpu className="w-5 h-5" />
                   </div>
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    AMD / Intel x64 • 8 Cores / 16 Threads
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100 tracking-wide">Processor Core</h3>
+                    <p className="text-[11px] text-slate-400 font-medium">AMD / Intel x64 Architecture</p>
                   </div>
                 </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-2xl font-extrabold font-mono text-cyan-400 tracking-tight">
-                  {metrics.cpuUsagePercent}%
-                </div>
-                <div className="text-[10px] text-slate-400 font-mono">
-                  {metrics.cpuClockSpeedGhz.toFixed(2)} GHz
-                </div>
-              </div>
-            </div>
-
-            {/* Gauge bar */}
-            <div className="my-3">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
-                <span>Processor Utilization</span>
-                <span className="font-mono text-slate-200">{metrics.cpuUsagePercent}%</span>
-              </div>
-              <div className="h-2 w-full bg-[#0B0F1A] rounded-full overflow-hidden border border-[#1F293D]">
-                <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    metrics.cpuUsagePercent > 75
-                      ? 'bg-rose-500'
-                      : metrics.cpuUsagePercent > 45
-                      ? 'bg-amber-400'
-                      : 'bg-gradient-to-r from-[#0284C7] to-cyan-400'
-                  }`}
-                  style={{ width: `${metrics.cpuUsagePercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Sparkline Graph */}
-            <div className="bg-[#0B0F1A] p-2.5 rounded-lg border border-[#1F293D] mb-3">
-              <div className="text-[10px] text-slate-500 font-mono uppercase mb-1 flex items-center justify-between">
-                <span>Load History (Last 20s)</span>
-                <span className="text-cyan-400">Peak: {Math.max(...metrics.cpuHistory)}%</span>
-              </div>
-              {renderSparkline(metrics.cpuHistory, 100, '#0284C7')}
-            </div>
-
-            {/* Micro details grid */}
-            <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1 border-t border-[#1F293D]">
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">Processes</div>
-                <div className="font-bold text-slate-200 font-mono">{metrics.cpuProcesses}</div>
-              </div>
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">Threads</div>
-                <div className="font-bold text-slate-200 font-mono">{metrics.cpuThreads.toLocaleString()}</div>
-              </div>
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">Base Speed</div>
-                <div className="font-bold text-slate-200 font-mono">3.60 GHz</div>
-              </div>
-            </div>
-          </div>
-
-          {/* CARD 2: RAM (MEMORY) MONITOR */}
-          <div className="bg-[#161B2A] border border-[#1F293D] rounded-xl p-5 shadow-xl flex flex-col justify-between relative overflow-hidden">
-            <div className="flex items-center justify-between pb-3 border-b border-[#1F293D]">
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <Layers className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                    RAM (Physical Memory)
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    16.0 GB DDR4 • 3200 MHz
+                <div className="text-right">
+                  <div className="text-3xl font-light tracking-tight text-cyan-400">
+                    {metrics.cpuUsagePercent}<span className="text-lg text-cyan-700">%</span>
                   </div>
                 </div>
               </div>
 
-              <div className="text-right">
-                <div className="text-2xl font-extrabold font-mono text-emerald-400 tracking-tight">
-                  {metrics.ramPercent}%
+              {/* Minimal Sparkline */}
+              <div className="mb-6 opacity-80 group-hover:opacity-100 transition-opacity">
+                {renderSparkline(metrics.cpuHistory, 100, '#06b6d4')}
+              </div>
+
+              {/* Data Rows */}
+              <div className="space-y-3 mb-8 text-xs font-medium">
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Clock Speed</span>
+                  <span className="text-slate-200 font-mono">{metrics.cpuClockSpeedGhz.toFixed(2)} GHz</span>
                 </div>
-                <div className="text-[10px] text-slate-400 font-mono">
-                  {metrics.ramUsedGB.toFixed(1)} / {metrics.ramTotalGB.toFixed(1)} GB
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Logical Cores</span>
+                  <span className="text-slate-200 font-mono">16 Threads</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Active Processes</span>
+                  <span className="text-slate-200 font-mono">{metrics.cpuProcesses}</span>
                 </div>
               </div>
             </div>
 
-            {/* Gauge bar */}
-            <div className="my-3">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
-                <span>Committed & In-Use</span>
-                <span className="font-mono text-slate-200">
-                  {metrics.ramUsedGB.toFixed(1)} GB ({metrics.ramPercent}%)
+            {/* Action Button */}
+            <div className="relative z-10">
+              <button
+                onClick={() => handleInlineTask('cpu', 'cpu')}
+                disabled={taskState.cpu === 'running' || isExecuting}
+                className={`w-full py-3 px-4 rounded-xl text-sm font-bold tracking-wide transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg ${
+                  taskState.cpu === 'running'
+                    ? 'bg-cyan-950 text-cyan-400 border border-cyan-800 cursor-wait'
+                    : taskState.cpu === 'success'
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                    : taskState.cpu === 'failed'
+                    ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                    : 'bg-[#1E293B] hover:bg-cyan-600 hover:shadow-cyan-900/50 text-slate-200 hover:text-white border border-slate-700 hover:border-cyan-500'
+                }`}
+              >
+                {taskState.cpu === 'running' ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : taskState.cpu === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : taskState.cpu === 'failed' ? (
+                  <AlertCircle className="w-4 h-4" />
+                ) : (
+                  <Zap className="w-4 h-4" />
+                )}
+                <span>
+                  {taskState.cpu === 'running'
+                    ? 'Optimizing CPU...'
+                    : taskState.cpu === 'success'
+                    ? 'CPU Optimized'
+                    : taskState.cpu === 'failed'
+                    ? 'Optimization Failed'
+                    : 'Optimize CPU'}
                 </span>
-              </div>
-              <div className="h-2 w-full bg-[#0B0F1A] rounded-full overflow-hidden border border-[#1F293D]">
-                <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    metrics.ramPercent > 80
-                      ? 'bg-rose-500'
-                      : metrics.ramPercent > 60
-                      ? 'bg-amber-400'
-                      : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                  }`}
-                  style={{ width: `${metrics.ramPercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Sparkline Graph */}
-            <div className="bg-[#0B0F1A] p-2.5 rounded-lg border border-[#1F293D] mb-3">
-              <div className="text-[10px] text-slate-500 font-mono uppercase mb-1 flex items-center justify-between">
-                <span>Memory History (Last 20s)</span>
-                <span className="text-emerald-400">Standby Cache: {metrics.ramStandbyGB.toFixed(1)} GB</span>
-              </div>
-              {renderSparkline(metrics.ramHistory, 100, '#10B981')}
-            </div>
-
-            {/* Micro details grid */}
-            <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1 border-t border-[#1F293D]">
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">In-Use</div>
-                <div className="font-bold text-slate-200 font-mono">{(metrics.ramUsedGB - metrics.ramStandbyGB).toFixed(1)} GB</div>
-              </div>
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">Standby Cache</div>
-                <div className="font-bold text-cyan-300 font-mono">{metrics.ramStandbyGB.toFixed(1)} GB</div>
-              </div>
-              <div className="bg-[#0F1423] p-1.5 rounded border border-[#1F293D]">
-                <div className="text-[10px] text-slate-500 font-mono">Available</div>
-                <div className="font-bold text-emerald-400 font-mono">{(metrics.ramTotalGB - metrics.ramUsedGB).toFixed(1)} GB</div>
-              </div>
+              </button>
             </div>
           </div>
 
-          {/* CARD 3: STORAGE DRIVE & ACTIVE PROCESSES */}
-          <div className="bg-[#161B2A] border border-[#1F293D] rounded-xl p-5 shadow-xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 border-b border-[#1F293D]">
-                <div className="flex items-center space-x-2.5">
-                  <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          {/* CARD 2: RAM */}
+          <div className="group relative bg-gradient-to-b from-[#0F172A]/90 to-[#0B1121]/90 backdrop-blur-md rounded-2xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden border border-slate-800/60 hover:border-emerald-900/50 transition-all duration-500">
+            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+            
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-950/40 flex items-center justify-center text-emerald-400 shadow-inner border border-emerald-800/30">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100 tracking-wide">System Memory</h3>
+                    <p className="text-[11px] text-slate-400 font-medium">{metrics.ramTotalGB.toFixed(1)} GB Physical RAM</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-light tracking-tight text-emerald-400">
+                    {metrics.ramPercent}<span className="text-lg text-emerald-700">%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Minimal Sparkline */}
+              <div className="mb-6 opacity-80 group-hover:opacity-100 transition-opacity">
+                {renderSparkline(metrics.ramHistory, 100, '#10b981')}
+              </div>
+
+              {/* Data Rows */}
+              <div className="space-y-3 mb-8 text-xs font-medium">
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">In-Use Memory</span>
+                  <span className="text-slate-200 font-mono">{(metrics.ramUsedGB - metrics.ramStandbyGB).toFixed(1)} GB</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Standby Cache</span>
+                  <span className="text-emerald-400 font-mono">{metrics.ramStandbyGB.toFixed(1)} GB</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Available Free</span>
+                  <span className="text-slate-200 font-mono">{(metrics.ramTotalGB - metrics.ramUsedGB).toFixed(1)} GB</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Button */}
+            <div className="relative z-10">
+              <button
+                onClick={() => handleInlineTask('ram', 'ram')}
+                disabled={taskState.ram === 'running' || isExecuting}
+                className={`w-full py-3 px-4 rounded-xl text-sm font-bold tracking-wide transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg ${
+                  taskState.ram === 'running'
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800 cursor-wait'
+                    : taskState.ram === 'success'
+                    ? 'bg-teal-950 text-teal-400 border border-teal-800'
+                    : taskState.ram === 'failed'
+                    ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                    : 'bg-[#1E293B] hover:bg-emerald-600 hover:shadow-emerald-900/50 text-slate-200 hover:text-white border border-slate-700 hover:border-emerald-500'
+                }`}
+              >
+                {taskState.ram === 'running' ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : taskState.ram === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : taskState.ram === 'failed' ? (
+                  <AlertCircle className="w-4 h-4" />
+                ) : (
+                  <RotateCcw className="w-4 h-4" />
+                )}
+                <span>
+                  {taskState.ram === 'running'
+                    ? 'Flushing Memory...'
+                    : taskState.ram === 'success'
+                    ? 'RAM Flushed'
+                    : taskState.ram === 'failed'
+                    ? 'Flush Failed'
+                    : 'Flush RAM'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* CARD 3: DISK */}
+          <div className="group relative bg-gradient-to-b from-[#0F172A]/90 to-[#0B1121]/90 backdrop-blur-md rounded-2xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden border border-slate-800/60 hover:border-purple-900/50 transition-all duration-500">
+            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-purple-500/40 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+            
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-full bg-purple-950/40 flex items-center justify-center text-purple-400 shadow-inner border border-purple-800/30">
                     <HardDrive className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                      System Drive (C:)
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      NVMe SSD • NTFS Primary
-                    </div>
+                    <h3 className="text-sm font-semibold text-slate-100 tracking-wide">System Drive</h3>
+                    <p className="text-[11px] text-slate-400 font-medium">OS Volume (C:)</p>
                   </div>
                 </div>
-
                 <div className="text-right">
-                  <div className="text-sm font-bold font-mono text-purple-300">
-                    {metrics.driveUsedGB} GB / {metrics.driveTotalGB} GB
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono">
-                    {(metrics.driveTotalGB - metrics.driveUsedGB)} GB Free
+                  <div className="text-3xl font-light tracking-tight text-purple-400">
+                    {Math.round((metrics.driveUsedGB / metrics.driveTotalGB) * 100)}<span className="text-lg text-purple-700">%</span>
                   </div>
                 </div>
               </div>
 
-              {/* Drive Bar */}
-              <div className="my-3">
-                <div className="h-2 w-full bg-[#0B0F1A] rounded-full overflow-hidden border border-[#1F293D]">
+              {/* Minimal Storage Bar */}
+              <div className="mb-6 pt-3">
+                <div className="h-1.5 w-full bg-slate-800/50 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 rounded-full"
+                    className="h-full bg-purple-500 rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(168,85,247,0.5)]"
                     style={{ width: `${(metrics.driveUsedGB / metrics.driveTotalGB) * 100}%` }}
                   />
                 </div>
+                <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-medium">
+                  <span>{metrics.driveUsedGB} GB Used</span>
+                  <span>{metrics.driveTotalGB} GB Total</span>
+                </div>
               </div>
 
-              {/* Active Process List */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pb-1 border-b border-[#1F293D]">
-                  <span className="font-semibold uppercase tracking-wider text-[10px]">Top Active Processes</span>
-                  <span className="text-[10px] font-mono">CPU / RAM</span>
+              {/* Data Rows */}
+              <div className="space-y-3 mb-8 text-xs font-medium">
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Free Space</span>
+                  <span className="text-purple-400 font-mono">{(metrics.driveTotalGB - metrics.driveUsedGB)} GB</span>
                 </div>
-
-                <div className="space-y-1 text-xs">
-                  {metrics.topProcesses.map((p) => (
-                    <div
-                      key={p.pid}
-                      className="flex items-center justify-between py-1 px-2 rounded bg-[#0F1423] border border-[#1F293D] font-mono text-[11px]"
-                    >
-                      <div className="flex items-center space-x-2 overflow-hidden">
-                        <span className="text-slate-500 text-[10px]">[{p.pid}]</span>
-                        <span className="font-medium text-slate-200 truncate">{p.name}</span>
-                      </div>
-                      <div className="flex items-center space-x-2 text-right">
-                        <span className="text-cyan-300">{p.cpuPercent}%</span>
-                        <span className="text-slate-400">{p.memMB}MB</span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Top Process</span>
+                  <span className="text-slate-200 truncate max-w-[120px] text-right">
+                    {metrics.topProcesses[0]?.name || 'System Idle'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                  <span className="text-slate-500">Top Process RAM</span>
+                  <span className="text-slate-200 font-mono">
+                    {metrics.topProcesses[0]?.memMB || 0} MB
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Quick action button right on the RAM card */}
-            <div className="pt-3 mt-2 border-t border-[#1F293D] flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">Need instant RAM flush?</span>
+            {/* Action Button */}
+            <div className="relative z-10">
               <button
-                onClick={() => onSelectTask(OPTIMIZATION_TASKS.find((t) => t.id === 'ram')!)}
-                disabled={isExecuting}
-                className="px-2.5 py-1 bg-emerald-950/40 hover:bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 text-xs font-semibold rounded-md flex items-center space-x-1 cursor-pointer transition-colors"
+                onClick={() => handleInlineTask('disk', 'temp')}
+                disabled={taskState.disk === 'running' || isExecuting}
+                className={`w-full py-3 px-4 rounded-xl text-sm font-bold tracking-wide transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg ${
+                  taskState.disk === 'running'
+                    ? 'bg-purple-950 text-purple-400 border border-purple-800 cursor-wait'
+                    : taskState.disk === 'success'
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                    : taskState.disk === 'failed'
+                    ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                    : 'bg-[#1E293B] hover:bg-purple-600 hover:shadow-purple-900/50 text-slate-200 hover:text-white border border-slate-700 hover:border-purple-500'
+                }`}
               >
-                <Zap className="w-3 h-3 text-emerald-400" />
-                <span>Flush RAM Now</span>
+                {taskState.disk === 'running' ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : taskState.disk === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : taskState.disk === 'failed' ? (
+                  <AlertCircle className="w-4 h-4" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>
+                  {taskState.disk === 'running'
+                    ? 'Cleaning Drive...'
+                    : taskState.disk === 'success'
+                    ? 'Drive Cleaned'
+                    : taskState.disk === 'failed'
+                    ? 'Cleanup Failed'
+                    : 'Clean Drive'}
+                </span>
               </button>
             </div>
           </div>
         </div>
       </div>
-
       {/* SECTION 2: COMMAND EXECUTION BUTTONS (NO RAW CODE - ASKS UAC -> RUNS POWERSHELL -> REPORTS) */}
       <div>
         <div className="flex items-center justify-between mb-3">

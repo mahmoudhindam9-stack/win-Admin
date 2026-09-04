@@ -27,15 +27,15 @@ export const UACPermissionModal: React.FC<UACPermissionModalProps> = ({
       >
         {/* Windows UAC Header */}
         <div className="bg-gradient-to-r from-[#0C243C] via-[#0F172A] to-[#1E293B] px-5 py-4 border-b border-[#1F293D] flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-inner">
+          <div className="w-10 h-10 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-inner">
             <ShieldAlert className="w-6 h-6" />
           </div>
           <div className="flex-1">
-            <div className="text-[11px] font-bold text-amber-400 uppercase tracking-widest flex items-center space-x-1.5">
-              <span>Windows User Account Control (UAC)</span>
+            <div className="text-[11px] font-bold text-cyan-400 uppercase tracking-widest flex items-center space-x-1.5">
+              <span>Administrative Task Confirmation</span>
             </div>
             <h3 id="uac-title" className="text-sm sm:text-base font-bold text-slate-100 mt-0.5">
-              Do you want to allow this app to make changes to your device?
+              Do you want to run this optimization task?
             </h3>
           </div>
           <button
@@ -47,30 +47,30 @@ export const UACPermissionModal: React.FC<UACPermissionModalProps> = ({
           </button>
         </div>
 
-        {/* Task Details & Elevation Verification */}
+        {/* Task Details */}
         <div className="p-5 space-y-4 text-xs">
           {/* Target Identity */}
           <div className="bg-[#080B12] p-3.5 rounded-lg border border-[#1F293D] space-y-2">
             <div className="flex items-center justify-between pb-2 border-b border-[#1F293D]">
-              <span className="text-slate-400 font-medium">Program Name:</span>
+              <span className="text-slate-400 font-medium">Task Engine:</span>
               <span className="font-semibold text-slate-100 flex items-center space-x-1.5">
                 <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                <span>PowerShell Elevated Administrative Host</span>
+                <span>Windows Performance Optimizer Suite</span>
               </span>
             </div>
 
             <div className="flex items-center justify-between pb-2 border-b border-[#1F293D]">
-              <span className="text-slate-400 font-medium">Verified Publisher:</span>
-              <span className="text-emerald-400 font-semibold flex items-center space-x-1">
-                <CheckCircle className="w-3.5 h-3.5" />
-                <span>Microsoft Windows Automation Principal</span>
+              <span className="text-slate-400 font-medium">Elevation Note:</span>
+              <span className="text-amber-400 font-semibold flex items-center space-x-1">
+                <Shield className="w-3.5 h-3.5" />
+                <span>Requires Administrator Rights</span>
               </span>
             </div>
 
             <div className="flex items-center justify-between">
               <span className="text-slate-400 font-medium">Elevation Scope:</span>
               <span className="text-amber-300 font-mono text-[11px] font-semibold bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/60">
-                RunAs Administrator (High Integrity Token)
+                UAC Privilege Escalation
               </span>
             </div>
           </div>

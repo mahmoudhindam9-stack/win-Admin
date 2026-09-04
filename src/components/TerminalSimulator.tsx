@@ -37,7 +37,6 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(0);
   const [speed, setSpeed] = useState<number>(2); // Default fast 2x for smooth responsive experience
-  const [browserRunningMock, setBrowserRunningMock] = useState(false);
   const [summary, setSummary] = useState<ExecutionSummary | null>(null);
   const [completedReport, setCompletedReport] = useState<ExecutionReport | null>(null);
 
@@ -68,7 +67,7 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
     return new Promise((resolve) => setTimeout(resolve, adjusted));
   };
 
-  const runSimulation = async (taskToRun: OptimizationTaskInfo | null = activeTask) => {
+  const runTask = async (taskToRun: OptimizationTaskInfo | null = activeTask) => {
     if (isRunning) return;
     setIsRunning(true);
     setIsPaused(false);
@@ -112,10 +111,9 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
     
     if (window.electronAPI) {
       try {
-         const script = taskToRun?.commandPreview || 'Write-Output "No script provided"';
          const elevate = taskToRun?.id !== 'router_config'; // Let's elevate all optimization tasks except maybe router if not needed, but typical admin tasks need it.
          
-         const result = await window.electronAPI.executePowerShell(script, elevate);
+         const result = await window.electronAPI.runOptimizationTask(taskId, config, elevate);
          success = result.success;
          exitCode = result.exitCode;
          
@@ -197,7 +195,7 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
   // Auto-start when triggered by UAC approval
   useEffect(() => {
     if (autoStart && activeTask && !isRunning) {
-      runSimulation(activeTask);
+      runTask(activeTask);
     }
   }, [autoStart, activeTask]);
 
@@ -268,8 +266,8 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
           {/* Run button if not running */}
           {!isRunning ? (
             <button
-              id="run-terminal-simulation-btn"
-              onClick={() => runSimulation(activeTask)}
+              id="run-terminal-task-btn"
+              onClick={() => runTask(activeTask)}
               className="px-3 py-1 bg-gradient-to-r from-[#0284C7] to-[#2563EB] hover:from-[#0369A1] hover:to-[#1D4ED8] text-white rounded-lg text-xs font-sans font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
             >
               <Play className="w-3 h-3 fill-current" />
@@ -368,7 +366,7 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
               </p>
             </div>
             <button
-              onClick={() => runSimulation(activeTask)}
+              onClick={() => runTask(activeTask)}
               className="mt-2 px-4 py-2 bg-[#0F1423] border border-[#1F293D] hover:border-cyan-500/50 text-cyan-400 hover:text-cyan-300 rounded-lg text-xs font-semibold transition-all flex items-center space-x-2 cursor-pointer shadow-sm"
             >
               <Play className="w-3.5 h-3.5 fill-current" />

@@ -167,7 +167,7 @@ export async function autoDetectRouterGateway(
     latencyMs: 5,
     deviceInfo: {
         ...bestMatch,
-        detectionConfidence: discoveredVia === 'probe' ? 'confirmed' : 'fallback'
+        detectionConfidence: discoveredVia === 'probe' ? 'confirmed' : 'probable'
     },
   };
 }

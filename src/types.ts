@@ -12,6 +12,7 @@ export interface ScriptConfig {
   cleanBraveCache: boolean;
   restartPerformanceServices: boolean;
   adjustVisualEffects: boolean;
+  optimizeCPU: boolean;
   visualEffectsPreset: 'performance' | 'balanced' | 'appearance';
   createRestorePoint: boolean;
   dryRunMode: boolean;
@@ -25,6 +26,7 @@ export type OptimizationTaskId =
   | 'browser'
   | 'ram'
   | 'update'
+  | 'cpu'
   | 'router_config';
 
 export interface OptimizationTaskInfo {
@@ -93,7 +95,8 @@ declare global {
   interface Window {
     electronAPI?: {
       getSystemMetrics: () => Promise<HardwareMetrics>;
-      executePowerShell: (script: string, elevate: boolean) => Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string }>;
+      checkElevation: () => Promise<boolean>;
+      runOptimizationTask: (taskId: OptimizationTaskId, config: ScriptConfig, elevate: boolean) => Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string; error?: string }>;
       onExecutionProgress: (callback: (data: { type: 'stdout' | 'stderr'; data: string }) => void) => () => void;
       routerApi: (action: string, data?: any) => Promise<any>;
     };

@@ -44,35 +44,6 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
   ];
 
   // In-memory cache of live configuration when connected
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'OpenWrt-2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 6,
-      channelWidth: '20MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'OpenWrt-5G',
-      password: '',
-      securityMode: 'WPA3-SAE',
-      channel: 36,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    guestNetwork: {
-      enabled: false,
-      ssid: 'OpenWrt-Guest',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      isolateClients: true,
-    },
-  };
 
   async probeSignature(
     gatewayIp: string,
@@ -469,7 +440,7 @@ echo "OpenWrt wireless updated successfully."
   }
 
   private parseUciWireless(values: any): RouterWirelessConfig {
-    const config: RouterWirelessConfig = { ...this.activeConfigCache };
+    const config: RouterWirelessConfig = {};
     for (const key of Object.keys(values)) {
       const item = values[key];
       if (item['.type'] === 'wifi-iface') {
@@ -482,7 +453,6 @@ echo "OpenWrt wireless updated successfully."
             channel: 6,
             channelWidth: '20MHz',
             hidden: item.hidden === '1',
-            txPower: '100%',
           };
         } else if (item.device === 'radio1') {
           config.band50 = {
@@ -493,7 +463,6 @@ echo "OpenWrt wireless updated successfully."
             channel: 36,
             channelWidth: '80MHz',
             hidden: item.hidden === '1',
-            txPower: '100%',
           };
         }
       }

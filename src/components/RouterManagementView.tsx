@@ -37,13 +37,9 @@ import {
 import { RouterAdapterRegistry } from '../services/router/registry';
 import { autoDetectRouterGateway, testGatewayPing } from '../services/router/detector';
 
-interface RouterManagementViewProps {
-  onExecuteScriptInTerminal?: (cmdTitle: string, powershellScript: string) => void;
-}
+interface RouterManagementViewProps {}
 
-export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
-  onExecuteScriptInTerminal,
-}) => {
+export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
   const registry = RouterAdapterRegistry.getInstance();
   const supportedBrands = registry.getSupportedBrands();
 
@@ -216,7 +212,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
         return;
       }
 
-      const token = loginRes.sessionToken || 'session_authenticated';
+      const token = loginRes.sessionToken || '';
       setSessionToken(token);
       setConnectionStatus('connected');
 
@@ -333,27 +329,17 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
   const currentAdapter = registry.getAdapter(deviceInfo.brand);
 
   const handleExportScript = () => {
-    const endpoint = `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`;
+    const endpoint = `${deviceInfo!.protocol}://${deviceInfo!.gatewayIp}:${deviceInfo!.port}`;
     const scripts = currentAdapter.generateDirectScript(endpoint, credentials, wirelessConfig);
     const blob = new Blob([scripts.powershell], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Configure-Router-${deviceInfo.brand}.ps1`;
+    a.download = `Configure-Router-${deviceInfo!.brand}.ps1`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  };
-
-  const handleExecuteInTerminal = () => {
-    if (!onExecuteScriptInTerminal) return;
-    const endpoint = `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`;
-    const scripts = currentAdapter.generateDirectScript(endpoint, credentials, wirelessConfig);
-    onExecuteScriptInTerminal(
-      `Configure ${deviceInfo.brandName} Wi-Fi Settings`,
-      scripts.powershell
-    );
   };
 
   const handleReboot = async () => {
@@ -1291,18 +1277,6 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
                     }
                   </pre>
                 </div>
-
-                {onExecuteScriptInTerminal && (
-                  <div className="pt-2">
-                    <button
-                      onClick={handleExecuteInTerminal}
-                      className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 shadow-sm"
-                    >
-                      <Terminal className="w-3.5 h-3.5" />
-                      <span>Execute Script in PowerShell Terminal Console</span>
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}

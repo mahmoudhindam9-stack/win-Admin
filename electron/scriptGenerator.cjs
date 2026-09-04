@@ -1,6 +1,30 @@
-import { ScriptConfig } from '../types';
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-export function generatePowerShellScript(config: ScriptConfig): string {
+// src/data/scriptGenerator.ts
+var scriptGenerator_exports = {};
+__export(scriptGenerator_exports, {
+  generateBatchScript: () => generateBatchScript,
+  generateHybridLauncher: () => generateHybridLauncher,
+  generatePowerShellScript: () => generatePowerShellScript
+});
+module.exports = __toCommonJS(scriptGenerator_exports);
+function generatePowerShellScript(config) {
   return `<#
 .SYNOPSIS
     WinOptimize.ps1 - Enterprise Windows Maintenance & Performance Optimization Suite
@@ -20,9 +44,9 @@ export function generatePowerShellScript(config: ScriptConfig): string {
 # ==============================================================================
 [CmdletBinding()]
 param (
-    [switch]$DryRun = ${config.dryRunMode ? '$true' : '$false'},
-    [switch]$ForceWinsockReset = ${config.resetWinsockAndTcpIp ? '$true' : '$false'},
-    [switch]$EnableVisualTweaks = ${config.adjustVisualEffects ? '$true' : '$false'}
+    [switch]$DryRun = ${config.dryRunMode ? "$true" : "$false"},
+    [switch]$ForceWinsockReset = ${config.resetWinsockAndTcpIp ? "$true" : "$false"},
+    [switch]$EnableVisualTweaks = ${config.adjustVisualEffects ? "$true" : "$false"}
 )
 
 # Enforce TLS 1.2+ and UTF-8 encoding
@@ -179,7 +203,7 @@ try {
 } catch {
     Write-WarningMsg "Unable to create restore point ($($_.Exception.Message)). Continuing with safe operations."
 }
-` : ''}
+` : ""}
 
 # ==============================================================================
 # SECTION 1: SYSTEM CLEANUP & TEMP REMOVAL
@@ -269,7 +293,7 @@ $doCache = "$env:SystemDrive\\ProgramData\\Microsoft\\Network\\Downloader"
 if (Test-Path $doCache) {
     Safe-RemoveDirectoryContents -Path $doCache -Description "Delivery Optimization Cache"
 }
-` : ''}
+` : ""}
 
 # ==============================================================================
 # SECTION 2: NETWORK & DNS OPTIMIZATION
@@ -384,7 +408,7 @@ Clear-BrowserCacheSafe -BrowserName "Brave Browser" -ProcessName "brave" -CacheD
     "$env:LOCALAPPDATA\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Cache",
     "$env:LOCALAPPDATA\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Code Cache"
 )
-` : ''}
+` : ""}
 
 # ==============================================================================
 # SECTION 4: WINDOWS PERFORMANCE & SERVICE TWEAKS
@@ -407,7 +431,7 @@ if (-not $DryRun) {
 } else {
     Write-Info "[DRY-RUN] Would activate High Performance power plan & tune priority scheduling."
 }
-` : ''}
+` : ""}
 
 ${config.restartPerformanceServices ? `
 # 4.1 Optimization of Performance Background Services
@@ -458,7 +482,7 @@ if ($EnableVisualTweaks) {
             reg export "HKCU\\Control Panel\\Desktop" "$backupFile" /y | Out-Null
             Write-Info "Created rollback backup file at: $backupFile"
 
-            ${config.visualEffectsPreset === 'performance' ? `
+            ${config.visualEffectsPreset === "performance" ? `
             # Best Performance Mode: Disable unnecessary animations while preserving ClearType font smoothing
             Set-ItemProperty -Path $regPathDesktop -Name "MenuShowDelay" -Value "20" -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $regPathDesktop -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x01,0x80)) -ErrorAction SilentlyContinue
@@ -466,7 +490,7 @@ if ($EnableVisualTweaks) {
             if (-not (Test-Path $regPathVisual)) { New-Item -Path $regPathVisual -Force | Out-Null }
             Set-ItemProperty -Path $regPathVisual -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
             Write-Success "Configured Visual Effects for High Performance (animations reduced, crisp fonts retained)."
-            ` : config.visualEffectsPreset === 'balanced' ? `
+            ` : config.visualEffectsPreset === "balanced" ? `
             # Balanced Mode: Smooth fonts, crisp shadows, subtle responsive transitions
             Set-ItemProperty -Path $regPathDesktop -Name "MenuShowDelay" -Value "100" -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $regPathDesktop -Name "FontSmoothing" -Value "2" -ErrorAction SilentlyContinue
@@ -520,7 +544,7 @@ Write-Host "--------------------------------------------------------------------
 if ($Global:RequiresReboot) {
     Write-Host "[!] REBOOT RECOMMENDATION: Please reboot your system to complete network stack rebuild." -ForegroundColor Yellow
 } else {
-    Write-Host "[✓] Windows optimization completed safely. No system restart is required." -ForegroundColor Green
+    Write-Host "[\u2713] Windows optimization completed safely. No system restart is required." -ForegroundColor Green
 }
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -528,8 +552,7 @@ Write-Host "Press any key to exit this optimization session..." -ForegroundColor
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 `;
 }
-
-export function generateBatchScript(config: ScriptConfig): string {
+function generateBatchScript(config) {
   return `@echo off
 :: ============================================================================
 :: WinOptimize.bat - Enterprise Windows System Cleaner & Performance Suite
@@ -642,7 +665,7 @@ if !errorlevel! equ 0 (
     del /q /f /s "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Code Cache\\*" >nul 2>&1
     echo  [OK] Google Chrome cache cleaned.
 )
-` : ''}
+` : ""}
 
 ${config.cleanEdgeCache ? `
 tasklist /fi "imagename eq msedge.exe" | find /i "msedge.exe" >nul
@@ -654,7 +677,7 @@ if !errorlevel! equ 0 (
     del /q /f /s "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Code Cache\\*" >nul 2>&1
     echo  [OK] Microsoft Edge cache cleaned.
 )
-` : ''}
+` : ""}
 
 ${config.cleanFirefoxCache ? `
 tasklist /fi "imagename eq firefox.exe" | find /i "firefox.exe" >nul
@@ -667,7 +690,7 @@ if !errorlevel! equ 0 (
     )
     echo  [OK] Mozilla Firefox cache cleaned.
 )
-` : ''}
+` : ""}
 
 echo.
 
@@ -693,7 +716,7 @@ ${config.adjustVisualEffects ? `
 echo  - Adjusting menu delay response for snappy feel...
 reg add "HKCU\\Control Panel\\Desktop" /v MenuShowDelay /t REG_SZ /d 20 /f >nul 2>&1
 echo  [OK] Menu responsiveness accelerated.
-` : ''}
+` : ""}
 
 echo.
 echo ============================================================================
@@ -713,8 +736,7 @@ pause >nul
 exit /b 0
 `;
 }
-
-export function generateHybridLauncher(): string {
+function generateHybridLauncher() {
   return `@echo off
 :: WinOptimize-Launcher.bat
 :: One-click self-elevating launcher for WinOptimize.ps1
@@ -741,3 +763,9 @@ if exist "WinOptimize.ps1" (
 )
 `;
 }
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  generateBatchScript,
+  generateHybridLauncher,
+  generatePowerShellScript
+});

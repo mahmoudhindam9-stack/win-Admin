@@ -48,6 +48,14 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow();
 
+    ipcMain.handle('check-elevation', async () => {
+      return new Promise((resolve) => {
+        exec('net session', (error) => {
+          resolve(error === null);
+        });
+      });
+    });
+
     ipcMain.handle('get-system-metrics', async () => {
       try {
         const cpu = await si.cpu();
@@ -90,7 +98,18 @@ if (!gotTheLock) {
       }
     });
 
-    ipcMain.handle('execute-powershell', async (event, script, elevate) => {
+    const { generatePowerShellScript } = require('./scriptGenerator.cjs');
+
+    ipcMain.handle('run-optimization-task', async (event, taskId, config, elevate) => {
+      // Validate inputs
+      const allowedTaskIds = ['full', 'temp', 'dns', 'browser', 'ram', 'update', 'router_config', 'cpu'];
+      if (!allowedTaskIds.includes(taskId)) {
+        return { success: false, exitCode: -1, error: 'Invalid Task ID' };
+      }
+
+      // Generate the script using the shared script generator
+      const script = generatePowerShellScript(config);
+
       return new Promise((resolve, reject) => {
         const tempPath = path.join(app.getPath('temp'), `WinOpt_${Date.now()}.ps1`);
         fs.writeFileSync(tempPath, script);

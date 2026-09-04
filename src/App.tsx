@@ -39,6 +39,7 @@ export default function App() {
   const [autoStartTerminal, setAutoStartTerminal] = useState(false);
 
   // Live Hardware Telemetry State
+  const [isElevated, setIsElevated] = useState(false);
   const [metrics, setMetrics] = useState<HardwareMetrics>({
     cpuUsagePercent: 19,
     cpuClockSpeedGhz: 3.84,
@@ -72,6 +73,9 @@ export default function App() {
     const fetchMetrics = async () => {
       if (window.electronAPI) {
         try {
+          const elevated = await window.electronAPI.checkElevation();
+          setIsElevated(elevated);
+
           const realMetrics = await window.electronAPI.getSystemMetrics();
           if (realMetrics) {
             setMetrics(prev => {
@@ -117,27 +121,7 @@ export default function App() {
     setIsUACModalOpen(false);
   };
 
-  // Handler: Execute Router configuration script in PowerShell terminal
-  const handleExecuteRouterScript = (cmdTitle: string, powershellScript: string) => {
-    const routerTask: OptimizationTaskInfo = {
-      id: 'router_config',
-      title: cmdTitle,
-      shortDesc: 'Universal Router Management: Synchronize wireless settings, security credentials, and reload radio daemon.',
-      icon: 'Router',
-      riskLevel: 'Safe',
-      elevationScope: [
-        'Query Get-NetRoute for default gateway',
-        'Connect to router native management API',
-        'Commit SSID and WPA3/WPA2 wireless parameters',
-        'Reload wireless hostapd radio subsystem',
-      ],
-      commandPreview: powershellScript,
-    };
-    setSelectedTask(routerTask);
-    setIsUACModalOpen(true);
-  };
-
-  // Handler: PowerShell Terminal simulation finishes execution
+  // Handler: PowerShell Terminal finishes execution
   const handleExecutionComplete = (report: ExecutionReport) => {
     setIsExecuting(false);
     setAutoStartTerminal(false);
@@ -184,8 +168,8 @@ export default function App() {
             </span>
 
             <div className="flex items-center space-x-1.5 text-slate-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]" />
-              <span>UAC Elevation Protection Active</span>
+              <span className={`w-2 h-2 rounded-full shadow-[0_0_6px_rgba(52,211,153,0.6)] ${isElevated ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span>Administrator Status: {isElevated ? 'Elevated' : 'Not Elevated (Elevation Prompt on Execution)'}</span>
             </div>
 
             <div className="hidden sm:flex items-center space-x-3 text-slate-300 pl-2 border-l border-[#1F293D]">
@@ -231,9 +215,7 @@ export default function App() {
 
         {/* VIEW 2: UNIVERSAL ROUTER MANAGEMENT CONSOLE */}
         {activeView === 'router' && (
-          <RouterManagementView
-            onExecuteScriptInTerminal={handleExecuteRouterScript}
-          />
+          <RouterManagementView />
         )}
 
         {/* VIEW 3: POWERSHELL TERMINAL (DIRECT EXECUTION VIEW) */}
