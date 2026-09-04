@@ -11,13 +11,13 @@ for (const file of targets) {
   let text = fs.readFileSync(file, 'utf8');
   const before = text;
 
-  // PowerShell interprets $Description: as a variable/drive reference.
-  // These generators are JavaScript template literals, so ${Description}
-  // must be escaped in the JS source as \${Description}.
+  // PowerShell interprets $Description: ambiguously inside generated strings.
+  // These JavaScript template literals must escape the ${...} interpolation.
   text = text.replaceAll('$Description:', '\\${Description}:');
 
-  // The GUI executes scripts non-interactively; ReadKey can block or fail.
-  text = text.replace(/^[ \t]*\$null = \$Host\.UI\.RawUI\.ReadKey\("NoEcho,IncludeKeyDown"\)[ \t]*\r?\n?/gm, '');
+  // GUI execution is non-interactive. Remove ReadKey regardless of whitespace
+  // or line formatting so generated PowerShell never waits for console input.
+  text = text.replace(/\$Host\.UI\.RawUI\.ReadKey\(\s*"NoEcho,IncludeKeyDown"\s*\)\s*/g, '');
 
   if (text !== before) {
     fs.writeFileSync(file, text, 'utf8');
@@ -31,7 +31,7 @@ const runtime = fs.existsSync(runtimeFile) ? fs.readFileSync(runtimeFile, 'utf8'
 if (runtime.includes('$Description:')) {
   throw new Error('PowerShell generator patch verification failed: $Description: still present.');
 }
-if (runtime.includes('$Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")')) {
+if (/\$Host\.UI\.RawUI\.ReadKey\(/.test(runtime)) {
   throw new Error('PowerShell generator patch verification failed: ReadKey still present.');
 }
 if (!runtime.includes('\\${Description}:')) {
