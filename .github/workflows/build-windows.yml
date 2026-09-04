@@ -20,15 +20,26 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: package.json
 
-      - name: Read application version
+      - name: Read and validate application version
         id: version
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "package.json version '$version' is not valid semver X.Y.Z."
+          }
+
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $tagVersion = '${{ github.ref_name }}'.TrimStart('v')
+            if ($tagVersion -ne $version) {
+              throw "Release tag v$tagVersion does not match package.json version $version."
+            }
+          }
+
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Building Windows Performance Optimizer Suite v$version"
 
@@ -83,12 +94,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release for current application version
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+      - name: Publish GitHub Release for version tag
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Windows Performance Optimizer Suite v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: Windows Performance Optimizer Suite ${{ github.ref_name }}
           target_commitish: ${{ github.sha }}
           make_latest: true
           files: |
