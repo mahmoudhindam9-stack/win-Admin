@@ -78,252 +78,97 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
     setLogs([]);
     executionRef.current = { cancel: false, pause: false };
 
-    let freedMB = 0;
-    let freedRAM = 0;
-    let filesDeleted = 0;
-    let completed = 0;
-    let skipped = 0;
-    let warnings = 0;
-    let errors = 0;
-    let skippedLocks = 0;
-    const servicesRecycled: string[] = [];
-    const networkActions: string[] = [];
-    const detailedLogSummary: string[] = [];
-
     const startTime = Date.now();
     const taskId = taskToRun?.id || 'full';
-    const taskTitle = taskToRun?.title || 'One-Click Full System Optimization';
+    const taskTitle = taskToRun?.title || 'Windows Optimizer';
 
-    // PowerShell startup banner
-    addLog('header', 'Windows PowerShell (x64) [Version 7.4.2]');
-    addLog('header', 'Copyright (C) Microsoft Corporation. All rights reserved.');
+    addLog('header', 'Windows PowerShell (x64)');
     addLog('header', 'Loading elevated administrative session environment...');
-    await sleep(150);
-
-    const cmdStr = taskToRun
-      ? taskToRun.commandPreview
-      : 'powershell.exe -ExecutionPolicy Bypass -File .\\WinOptimize.ps1 -Elevated';
-
-    addLog('command', `PS C:\\WINDOWS\\system32> ${cmdStr}`);
-    await sleep(250);
-
-    // Elevation verification
-    addLog('info', 'Verifying security principal and elevation token...');
-    await sleep(200);
-    addLog('success', 'Security principal: S-1-5-32-544 (BUILTIN\\Administrators) High Mandatory Token');
-    await sleep(200);
-
-    addLog('header', '================================================================================');
-    addLog('header', `  EXECUTING: ${taskTitle.toUpperCase()}`);
-    addLog('header', '================================================================================');
-    addLog('info', `Host System: Windows 11 Enterprise x64 [Build 22631.3296]`);
-    addLog('info', `Administrative Context: NT AUTHORITY\\SYSTEM / Elevated Administrator`);
-    addLog('success', `Safety Guardrails: In-Use Process Lock Protection ENABLED`);
-    addLog('header', '--------------------------------------------------------------------------------');
-    setProgress(15);
-    await sleep(250);
-
-    // TASK-SPECIFIC BRANCHING:
-    if (taskId === 'temp' || taskId === 'full') {
-      addLog('header', '>>> [MODULE: TEMPORARY FILES & STORAGE RECLAMATION]');
-      
-      addLog('info', 'Scanning User Temp directory: %LOCALAPPDATA%\\Temp...');
-      await sleep(300);
-      const uFiles = 1048;
-      const uMB = 1280;
-      filesDeleted += uFiles;
-      freedMB += uMB;
-      skippedLocks += 3;
-      completed++;
-      detailedLogSummary.push(`Purged User Temp (%LOCALAPPDATA%\\Temp): ${uFiles} files deleted (${uMB} MB freed, 3 active locks bypassed)`);
-      addLog('success', `Cleaned User Temp: ${uFiles} files deleted (~${uMB} MB freed, 3 locked files safely preserved).`);
-
-      await sleep(250);
-      addLog('info', 'Scanning Windows System Temp directory: C:\\Windows\\Temp...');
-      await sleep(250);
-      const sFiles = 412;
-      const sMB = 480;
-      filesDeleted += sFiles;
-      freedMB += sMB;
-      skippedLocks += 1;
-      completed++;
-      detailedLogSummary.push(`Purged Windows System Temp (C:\\Windows\\Temp): ${sFiles} files deleted (${sMB} MB freed)`);
-      addLog('success', `Cleaned Windows System Temp: ${sFiles} files deleted (~${sMB} MB freed).`);
-
-      await sleep(250);
-      addLog('info', 'Purging Windows Recycle Bin across all mounted fixed drives (C:, D:)...');
-      await sleep(300);
-      const binFiles = 382;
-      const binMB = 820;
-      filesDeleted += binFiles;
-      freedMB += binMB;
-      completed++;
-      detailedLogSummary.push(`Emptied Windows Recycle Bin across all drives: ${binFiles} items removed (${binMB} MB freed)`);
-      addLog('success', `Recycle Bin successfully emptied: ${binFiles} items permanently deleted (~${binMB} MB freed).`);
-
-      await sleep(200);
-      addLog('info', 'Scanning Windows Prefetch folder (C:\\Windows\\Prefetch)...');
-      await sleep(250);
-      const pfFiles = 142;
-      const pfMB = 125;
-      filesDeleted += pfFiles;
-      freedMB += pfMB;
-      completed++;
-      detailedLogSummary.push(`Cleaned Prefetch cache: ${pfFiles} files removed (${pfMB} MB freed, layout.ini & ReadyBoot intact)`);
-      addLog('success', `Cleaned Prefetch: ${pfFiles} stale traces deleted (~${pfMB} MB freed, boot layout.ini protected).`);
-
-      setProgress(taskId === 'temp' ? 85 : 40);
+    addLog('command', `Executing: ${taskTitle}`);
+    
+    let stdoutText = '';
+    let stderrText = '';
+    let progressCleanup: (() => void) | null = null;
+    
+    if (window.electronAPI) {
+      progressCleanup = window.electronAPI.onExecutionProgress((data: any) => {
+         if (data.type === 'stdout') {
+             addLog('info', data.data.trim());
+             stdoutText += data.data;
+         } else if (data.type === 'stderr') {
+             addLog('error', data.data.trim());
+             stderrText += data.data;
+         }
+      });
     }
 
-    if (taskId === 'ram' || taskId === 'full') {
-      addLog('header', '>>> [MODULE: MEMORY CACHE & SYSMAIN RECYCLING]');
-      addLog('info', 'Querying Windows Virtual Memory subsystem and Standby List...');
-      await sleep(300);
-      
-      const ramReleasedMB = 680;
-      freedRAM += ramReleasedMB;
-      addLog('success', `Flushed Windows Standby Page List: ${ramReleasedMB} MB cached memory returned to Free pool.`);
-
-      await sleep(250);
-      addLog('info', 'Recycling SysMain (SuperFetch) memory indexing service...');
-      await sleep(300);
-      servicesRecycled.push('SysMain (SuperFetch)');
-      completed++;
-      detailedLogSummary.push(`Flushed Standby Memory List & recycled SysMain service (${ramReleasedMB} MB RAM freed)`);
-      addLog('success', 'SysMain service stopped, stale page index flushed, and service restarted successfully.');
-
-      setProgress(taskId === 'ram' ? 85 : 55);
-    }
-
-    if (taskId === 'dns' || taskId === 'full') {
-      addLog('header', '>>> [MODULE: DNS RESOLVER & NETWORK STACK]');
-      addLog('info', 'Executing Clear-DnsClientCache cmdlet...');
-      await sleep(250);
-      networkActions.push('Clear-DnsClientCache (Resolver Flushed)');
-      completed++;
-      addLog('success', 'Clear-DnsClientCache: Local DNS resolver cache flushed successfully.');
-
-      await sleep(200);
-      addLog('info', 'Executing ipconfig /flushdns...');
-      await sleep(200);
-      networkActions.push('ipconfig /flushdns (Windows IP Configuration updated)');
-      detailedLogSummary.push('Flushed DNS client cache and refreshed local resolver socket cache');
-      addLog('success', 'Windows IP Configuration: Successfully flushed the DNS Resolver Cache.');
-
-      setProgress(taskId === 'dns' ? 85 : 70);
-    }
-
-    if (taskId === 'browser' || taskId === 'full') {
-      addLog('header', '>>> [MODULE: INACTIVE BROWSER CACHES]');
-      addLog('info', 'Scanning active processes for Google Chrome, Microsoft Edge, Firefox, Brave...');
-      await sleep(300);
-
-      if (browserRunningMock) {
-        addLog('warning', 'Active browser detected (chrome.exe). Skipped to prevent SQLite database corruption.');
-        warnings++;
-        skipped++;
-        detailedLogSummary.push('Google Chrome: Active process detected, safely skipped to protect user SQLite profile');
-      } else {
-        addLog('info', 'Verifying Chrome & Edge processes are idle/closed...');
-        await sleep(250);
-        const bFiles = 840;
-        const bMB = 920;
-        filesDeleted += bFiles;
-        freedMB += bMB;
-        completed++;
-        detailedLogSummary.push(`Purged Chrome & Edge Web Caches: ${bFiles} cache objects deleted (${bMB} MB freed)`);
-        addLog('success', `Browser Caches: Purged ${bFiles} cached objects across Chrome & Edge (~${bMB} MB freed).`);
+    setProgress(20);
+    
+    let success = false;
+    let exitCode = -1;
+    let filesDeleted = 0;
+    let freedMB = 0;
+    let freedRAM = 0;
+    
+    if (window.electronAPI) {
+      try {
+         const script = taskToRun?.commandPreview || 'Write-Output "No script provided"';
+         const elevate = taskToRun?.id !== 'router_config'; // Let's elevate all optimization tasks except maybe router if not needed, but typical admin tasks need it.
+         
+         const result = await window.electronAPI.executePowerShell(script, elevate);
+         success = result.success;
+         exitCode = result.exitCode;
+         
+         if (result.stdout && !stdoutText) {
+             addLog('info', result.stdout.trim());
+             stdoutText += result.stdout;
+         }
+         if (result.stderr && !stderrText) {
+             addLog('error', result.stderr.trim());
+             stderrText += result.stderr;
+         }
+      } catch (err: any) {
+         addLog('error', `Execution failed: ${err.message}`);
       }
-
-      setProgress(taskId === 'browser' ? 85 : 85);
+    } else {
+       addLog('error', 'electronAPI is not available. Real execution requires running within the Electron environment.');
     }
 
-    if (taskId === 'update' || taskId === 'full') {
-      addLog('header', '>>> [MODULE: WINDOWS UPDATE CACHE]');
-      addLog('info', 'Temporarily pausing Windows Update (wuauserv) and BITS background services...');
-      await sleep(350);
-      addLog('success', 'Services paused safely.');
-
-      addLog('info', 'Purging obsolete installer packages in C:\\Windows\\SoftwareDistribution\\Download...');
-      await sleep(400);
-      const wuFiles = 210;
-      const wuMB = 1240;
-      filesDeleted += wuFiles;
-      freedMB += wuMB;
-      completed++;
-      detailedLogSummary.push(`Purged Windows Update Cache (SoftwareDistribution\\Download): ${wuFiles} packages deleted (${wuMB} MB freed)`);
-      addLog('success', `SoftwareDistribution cleaned: ${wuFiles} orphaned files deleted (~${wuMB} MB freed).`);
-
-      addLog('info', 'Restarting Windows Update (wuauserv) and BITS services in guaranteed finally block...');
-      await sleep(300);
-      servicesRecycled.push('wuauserv (Windows Update)', 'bits (Background Transfer)');
-      addLog('success', 'Windows Update & BITS services verified running and healthy.');
-
-      setProgress(taskId === 'update' ? 85 : 95);
+    if (progressCleanup) {
+        progressCleanup();
     }
 
-    if (taskId === 'router_config') {
-      addLog('header', '>>> [MODULE: UNIVERSAL ROUTER MANAGEMENT & GATEWAY DISCOVERY]');
-      addLog('info', 'Querying local network routing table for default gateway (Get-NetRoute)...');
-      await sleep(250);
-      networkActions.push('Get-NetRoute (Gateway Discovered: 192.168.1.1)');
-      completed++;
-      addLog('success', 'Detected active local gateway interface on NextHop: 192.168.1.1.');
-
-      await sleep(250);
-      addLog('info', 'Connecting to router management API endpoint...');
-      await sleep(250);
-      addLog('success', 'Router session established: Security token validated.');
-
-      await sleep(300);
-      addLog('info', 'Dispatching wireless configuration payload (SSID, WPA3/WPA2, Channel, Radio Daemon)...');
-      await sleep(350);
-      networkActions.push('Committed wireless configuration payload to NVRAM/UCI');
-      completed++;
-      addLog('success', 'Router NVRAM/UCI write successful: All wireless settings committed.');
-
-      await sleep(250);
-      addLog('info', 'Issuing wireless subsystem daemon reload command...');
-      await sleep(300);
-      servicesRecycled.push('Router hostapd & wireless radio subsystem');
-      completed++;
-      detailedLogSummary.push('Successfully applied new wireless parameters and verified router state via native API');
-      addLog('success', 'Router reports wireless radio reload complete. Wi-Fi broadcast active.');
-
-      setProgress(85);
-    }
-
-    // Final Report Generation
     setProgress(100);
-    await sleep(300);
+    
+    // Attempt basic regex to find freed MB if our powershell scripts output it
+    const mbMatch = stdoutText.match(/Freed.*?([0-9.]+)\s*MB/i);
+    if (mbMatch && mbMatch[1]) {
+       freedMB = parseFloat(mbMatch[1]);
+    }
 
     const durationSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(1));
 
     addLog('header', '================================================================================');
     addLog('header', '                         OPTIMIZATION REPORT SUMMARY                            ');
     addLog('header', '================================================================================');
-    addLog('metric', `STATUS:                 SUCCESS (All requested operations verified)`);
-    addLog('metric', `TOTAL FILES DELETED:    ${filesDeleted.toLocaleString()} files`);
-    addLog('metric', `STORAGE SPACE RECLAIMED: ${freedMB > 1024 ? (freedMB / 1024).toFixed(2) + ' GB' : freedMB + ' MB'}`);
-    if (freedRAM > 0) {
-      addLog('metric', `STANDBY RAM RELEASED:   ${freedRAM} MB RAM`);
+    addLog('metric', `STATUS:                 ${success ? 'SUCCESS' : 'FAILED'} (Exit Code ${exitCode})`);
+    if (freedMB > 0) {
+        addLog('metric', `STORAGE SPACE RECLAIMED: ${freedMB > 1024 ? (freedMB / 1024).toFixed(2) + ' GB' : freedMB + ' MB'}`);
     }
-    addLog('metric', `SAFE IN-USE LOCKS:      ${skippedLocks} files preserved without crash`);
     addLog('metric', `EXECUTION DURATION:     ${durationSeconds} seconds`);
     addLog('header', '================================================================================');
-    addLog('info', 'PS C:\\WINDOWS\\system32> [Script finished with exit code 0]');
 
     const execSummary: ExecutionSummary = {
-      tempFilesCleanedMB: Math.round(freedMB * 0.6),
-      browserCacheCleanedMB: Math.round(freedMB * 0.2),
-      updateCacheCleanedMB: Math.round(freedMB * 0.2),
+      tempFilesCleanedMB: taskId === 'temp' || taskId === 'full' ? freedMB : 0,
+      browserCacheCleanedMB: (taskId === 'browser' || taskId === 'full') ? freedMB : 0,
+      updateCacheCleanedMB: taskId === 'update' || taskId === 'full' ? freedMB : 0,
       totalSpaceFreedMB: freedMB,
-      tasksCompleted: completed,
-      tasksSkipped: skipped,
-      warningsCount: warnings,
-      errorsCount: errors,
+      tasksCompleted: success ? 1 : 0,
+      tasksSkipped: 0,
+      warningsCount: 0,
+      errorsCount: success ? 0 : 1,
       durationSeconds,
-      rebootRecommended: false,
+      rebootRecommended: taskId === 'update' || taskId === 'full',
     };
     setSummary(execSummary);
 
@@ -332,20 +177,20 @@ export const TerminalSimulator: React.FC<TerminalSimulatorProps> = ({
       taskTitle,
       timestamp: new Date().toLocaleTimeString(),
       durationSeconds,
-      success: true,
+      success,
       filesDeleted,
       spaceFreedMB: freedMB,
       memoryFreedMB: freedRAM,
-      servicesRecycled,
-      networkActions,
-      lockedFilesSkipped: skippedLocks,
-      detailedLogSummary,
+      servicesRecycled: [],
+      networkActions: [],
+      lockedFilesSkipped: 0,
+      detailedLogSummary: stdoutText.split('\n').filter(l => l.trim().length > 0).slice(-10),
     };
     setCompletedReport(report);
     setIsRunning(false);
 
     if (onExecutionComplete) {
-      onExecutionComplete(report);
+      setTimeout(() => onExecutionComplete(report), 1500);
     }
   };
 

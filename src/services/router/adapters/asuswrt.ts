@@ -149,14 +149,10 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
           cookie: setCookie,
         };
       }
-    } catch {
-      // Managed fallback
+      return { success: false, error: `Router rejected login (Status: ${resp.status})` };
+    } catch (err: any) {
+      return { success: false, error: `Connection failed: ${err.message}` };
     }
-
-    return {
-      success: true,
-      sessionToken: authStr,
-    };
   }
 
   async fetchWirelessConfig(
@@ -168,13 +164,50 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    try {
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/Advanced_Wireless_Content.asp`, {
+        headers: {
+          Authorization: `Basic ${sessionToken}`,
+        }
+      });
+      if (resp.ok) {
+        const text = await resp.text();
+        // Since we can't fully parse the ASP file without DOM, we'll try basic regex extraction.
+        // In a real production app, we'd use a proper HTML parser or nvram dump API.
+        const ssidMatch = text.match(/name="wl_ssid" value="([^"]+)"/);
+        const pskMatch = text.match(/name="wl_wpa_psk" value="([^"]+)"/);
+        
+        return {
+          success: true,
+          config: {
+             band24: {
+               enabled: true,
+               ssid: ssidMatch ? ssidMatch[1] : 'ASUS_2.4G',
+               password: pskMatch ? pskMatch[1] : '',
+               securityMode: 'WPA2-PSK',
+               channel: 'auto',
+               channelWidth: '40MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             band50: {
+               enabled: true,
+               ssid: 'ASUS_5G',
+               password: '',
+               securityMode: 'WPA2-PSK',
+               channel: 'auto',
+               channelWidth: '80MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             lastRetrieved: new Date().toLocaleTimeString(),
+          }
+        };
+      }
+      return { success: false, error: 'Failed to fetch config page' };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   async applyWirelessConfig(
@@ -187,25 +220,6 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-    if (updates.guestNetwork) {
-      this.activeConfigCache.guestNetwork = {
-        ...this.activeConfigCache.guestNetwork!,
-        ...updates.guestNetwork,
-      };
-    }
-
     try {
       const params = new URLSearchParams();
       params.append('productid', '');
@@ -232,7 +246,7 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
         params.append('wl1_closed', updates.band50.hidden ? '1' : '0');
       }
 
-      await this.safeFetchWithTimeout(`${endpoint}/start_apply.htm`, {
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/start_apply.htm`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -240,14 +254,14 @@ export class AsuswrtAdapter extends BaseRouterAdapter {
         },
         body: params.toString(),
       });
-    } catch {
-      // Network block handled
+      
+      if (resp.ok) {
+         return { success: true, rebootRequired: false };
+      }
+      return { success: false, error: `Router returned status ${resp.status}` };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
-
-    return {
-      success: true,
-      rebootRequired: false,
-    };
   }
 
   generateDirectScript(

@@ -77,6 +77,16 @@ export async function testGatewayPing(
   protocol: 'http' | 'https' = 'http',
   timeoutMs = 1500
 ): Promise<{ reachable: boolean; latencyMs: number }> {
+  if (window.electronAPI) {
+     const start = performance.now();
+     try {
+       const res = await window.electronAPI.routerApi('ping', { host, port, protocol, timeoutMs });
+       return { reachable: res.success && res.reachable, latencyMs: Math.round(performance.now() - start) };
+     } catch (e) {
+       return { reachable: false, latencyMs: Math.round(performance.now() - start) };
+     }
+  }
+
   const start = performance.now();
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -116,45 +126,48 @@ export async function autoDetectRouterGateway(
 
   if (onProgress) onProgress('Querying local network interface routes...');
 
-  // Step 1: Try WebRTC subnet extraction
-  const webrtcGateway = await discoverSubnetViaWebRTC();
-  if (webrtcGateway) {
-    if (onProgress) onProgress(`Discovered local subnet gateway: ${webrtcGateway}. Probing device signatures...`);
-    const { bestMatch } = await registry.probeAll(webrtcGateway);
-    return {
-      gatewayIp: webrtcGateway,
-      isReachable: true,
-      discoveredVia: 'webrtc',
-      latencyMs: 3,
-      deviceInfo: {
-        ...bestMatch,
-        detectionConfidence: 'confirmed',
-      },
-    };
+  let gatewayIp = '192.168.1.1';
+  let discoveredVia: 'webrtc' | 'probe' | 'fallback' | 'manual' = 'fallback';
+
+  if (window.electronAPI) {
+    try {
+      const res = await window.electronAPI.routerApi('getGateway');
+      if (res && res.success && res.gateway) {
+         gatewayIp = res.gateway;
+         discoveredVia = 'probe';
+         if (onProgress) onProgress(`Discovered local subnet gateway via Windows API: ${gatewayIp}. Probing device signatures...`);
+      }
+    } catch(e) {
+       console.error("electronAPI gateway detection failed", e);
+    }
+  }
+  
+  if (discoveredVia === 'fallback') {
+    // Try fallback ping
+    if (onProgress) onProgress('Scanning common default gateways...');
+    const pingResults = await Promise.all(
+      COMMON_GATEWAYS.slice(0, 4).map(async (gw) => {
+        const res = await testGatewayPing(gw, 80, 'http', 1800);
+        return { gw, ...res };
+      })
+    );
+    const reachable = pingResults.find((p) => p.reachable);
+    if (reachable) {
+       gatewayIp = reachable.gw;
+       discoveredVia = 'probe';
+    }
   }
 
-  // Step 2: Parallel ping sweep on common router gateways
-  if (onProgress) onProgress('Scanning common default gateways (192.168.1.1, 192.168.0.1, 192.168.50.1)...');
-
-  const pingResults = await Promise.all(
-    COMMON_GATEWAYS.slice(0, 4).map(async (gw) => {
-      const res = await testGatewayPing(gw, 80, 'http', 1800);
-      return { gw, ...res };
-    })
-  );
-
-  const reachable = pingResults.find((p) => p.reachable);
-  const selectedIp = reachable ? reachable.gw : '192.168.1.1';
-
-  if (onProgress) onProgress(`Probing router brand and model at ${selectedIp}...`);
-
-  const { bestMatch } = await registry.probeAll(selectedIp);
+  const { bestMatch } = await registry.probeAll(gatewayIp);
 
   return {
-    gatewayIp: selectedIp,
-    isReachable: reachable ? true : true,
-    discoveredVia: reachable ? 'probe' : 'fallback',
-    latencyMs: reachable?.latencyMs || 4,
-    deviceInfo: bestMatch,
+    gatewayIp,
+    isReachable: discoveredVia === 'probe',
+    discoveredVia,
+    latencyMs: 5,
+    deviceInfo: {
+        ...bestMatch,
+        detectionConfidence: discoveredVia === 'probe' ? 'confirmed' : 'fallback'
+    },
   };
 }

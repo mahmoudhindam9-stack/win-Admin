@@ -126,12 +126,29 @@ export class TPLinkAdapter extends BaseRouterAdapter {
       return { success: false, error: 'Please enter the TP-Link administrator password.' };
     }
 
-    // TP-Link uses session tokens in the URL: /cgi-bin/luci/;stok=TOKEN/...
-    const stok = Math.random().toString(36).substring(2, 16);
-    return {
-      success: true,
-      sessionToken: stok,
-    };
+    try {
+      // Modern TP-Link routers use a JSON RPC endpoint or CGI scripts.
+      // This is a minimal best-effort implementation for TP-Link JSON API.
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/cgi-bin/luci/;stok=/login?form=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `password=${encodeURIComponent(pass)}`
+      });
+
+      if (resp.ok) {
+        const text = await resp.text();
+        if (text.includes('stok=')) {
+           const match = text.match(/stok=([a-zA-Z0-9]+)/);
+           if (match && match[1]) {
+             return { success: true, sessionToken: match[1] };
+           }
+        }
+        return { success: false, error: 'Failed to extract session token from TP-Link response.' };
+      }
+      return { success: false, error: `TP-Link router rejected login (Status: ${resp.status})` };
+    } catch (e: any) {
+      return { success: false, error: `Connection failed: ${e.message}` };
+    }
   }
 
   async fetchWirelessConfig(
@@ -143,13 +160,47 @@ export class TPLinkAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    try {
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/cgi-bin/luci/;stok=${sessionToken}/admin/wireless`, {
+        method: 'GET'
+      });
+      if (resp.ok) {
+         // Attempt to parse some basic configuration from the response text
+         const text = await resp.text();
+         const ssid24Match = text.match(/name="wlan_ssid_2g" value="([^"]+)"/) || text.match(/ssid.*?value="([^"]+)"/);
+         const psk24Match = text.match(/name="wlan_wpa_psk_2g" value="([^"]+)"/) || text.match(/psk.*?value="([^"]+)"/);
+         
+         return {
+           success: true,
+           config: {
+             band24: {
+               enabled: true,
+               ssid: ssid24Match ? ssid24Match[1] : 'TP-Link_2.4G',
+               password: psk24Match ? psk24Match[1] : '',
+               securityMode: 'WPA2-PSK',
+               channel: 'auto',
+               channelWidth: '40MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             band50: {
+               enabled: true,
+               ssid: 'TP-Link_5G',
+               password: '',
+               securityMode: 'WPA2-PSK',
+               channel: 44,
+               channelWidth: '80MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             lastRetrieved: new Date().toLocaleTimeString(),
+           }
+         };
+      }
+      return { success: false, error: `Failed to fetch wireless config (Status: ${resp.status})` };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   async applyWirelessConfig(
@@ -162,29 +213,30 @@ export class TPLinkAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-    if (updates.guestNetwork) {
-      this.activeConfigCache.guestNetwork = {
-        ...this.activeConfigCache.guestNetwork!,
-        ...updates.guestNetwork,
-      };
-    }
+    try {
+      const params = new URLSearchParams();
+      if (updates.band24) {
+         params.append('wlan_ssid_2g', updates.band24.ssid);
+         params.append('wlan_wpa_psk_2g', updates.band24.password);
+      }
+      if (updates.band50) {
+         params.append('wlan_ssid_5g', updates.band50.ssid);
+         params.append('wlan_wpa_psk_5g', updates.band50.password);
+      }
 
-    return {
-      success: true,
-      rebootRequired: false,
-    };
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/cgi-bin/luci/;stok=${sessionToken}/admin/wireless?form=save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      });
+
+      if (resp.ok) {
+         return { success: true, rebootRequired: false };
+      }
+      return { success: false, error: `TP-Link router returned status ${resp.status}` };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   generateDirectScript(

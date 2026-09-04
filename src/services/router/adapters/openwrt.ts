@@ -172,24 +172,10 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
           };
         }
       }
+      return { success: false, error: `Router rejected login (Status: ${resp.status})` };
     } catch (e: any) {
-      // If browser CORS or PNA prevents direct ubus call, provide managed session
-      // with verified payload state
+      return { success: false, error: `Connection failed: ${e.message}` };
     }
-
-    // If password provided, generate session token for managed operation
-    if (password.length >= 1) {
-      const mockToken = `ubus_session_${Math.random().toString(36).substring(2, 12)}`;
-      return {
-        success: true,
-        sessionToken: mockToken,
-      };
-    }
-
-    return {
-      success: false,
-      error: 'Please provide the OpenWrt root password.',
-    };
   }
 
   async fetchWirelessConfig(
@@ -220,19 +206,16 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
             // Parse UCI wireless values
             const values = data.result[1].values;
             const liveConfig = this.parseUciWireless(values);
-            this.activeConfigCache = liveConfig;
             return { success: true, config: liveConfig, rawResponse: data };
           }
+          return { success: false, error: 'Failed to parse wireless config from UCI response' };
         }
+        return { success: false, error: `Router returned status ${resp.status}` };
       }
-    } catch {
-      // Network block handled
+      return { success: false, error: 'No session token provided for fetch' };
+    } catch (e: any) {
+      return { success: false, error: `Network connection failed: ${e.message}` };
     }
-
-    return {
-      success: true,
-      config: { ...this.activeConfigCache, lastRetrieved: new Date().toLocaleTimeString() },
-    };
   }
 
   async applyWirelessConfig(
@@ -245,26 +228,6 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    // Merge updates into active state
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-    if (updates.guestNetwork) {
-      this.activeConfigCache.guestNetwork = {
-        ...this.activeConfigCache.guestNetwork!,
-        ...updates.guestNetwork,
-      };
-    }
-
     try {
       // Send real UCI set, commit, and reload network action
       const uciCommands: any[] = [];
@@ -293,16 +256,44 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
         }
       }
 
+      if (updates.band50) {
+        if (updates.band50.ssid) {
+          uciCommands.push({
+            jsonrpc: '2.0',
+            id: 11,
+            method: 'call',
+            params: [
+              sessionToken,
+              'uci',
+              'set',
+              {
+                config: 'wireless',
+                section: 'default_radio1',
+                values: {
+                  ssid: updates.band50.ssid,
+                  key: updates.band50.password,
+                  encryption: this.mapSecurityToUci(updates.band50.securityMode),
+                  hidden: updates.band50.hidden ? '1' : '0',
+                },
+              },
+            ],
+          });
+        }
+      }
+
       for (const cmd of uciCommands) {
-        await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
+        const res = await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(cmd),
         });
+        if (!res.ok) {
+           return { success: false, error: 'Failed to set UCI values' };
+        }
       }
 
       // Commit changes
-      await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
+      const commitRes = await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -312,9 +303,10 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
           params: [sessionToken, 'uci', 'commit', { config: 'wireless' }],
         }),
       });
+      if (!commitRes.ok) return { success: false, error: 'Failed to commit UCI changes' };
 
       // Reload wireless subsystem
-      await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
+      const reloadRes = await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -324,14 +316,12 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
           params: [sessionToken, 'luci', 'setInitAction', { name: 'network', action: 'reload' }],
         }),
       });
-    } catch {
-      // Browser network boundary handled
-    }
+      if (!reloadRes.ok) return { success: false, error: 'Failed to reload wireless subsystem' };
 
-    return {
-      success: true,
-      rebootRequired: false,
-    };
+      return { success: true, rebootRequired: false };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   async rebootRouter(

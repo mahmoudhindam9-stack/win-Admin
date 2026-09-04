@@ -37,29 +37,6 @@ export class GenericRouterAdapter extends BaseRouterAdapter {
     'WPA-PSK',
   ];
 
-  private activeConfigCache: RouterWirelessConfig = {
-    band24: {
-      enabled: true,
-      ssid: 'Home_WiFi_2.4G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 1,
-      channelWidth: '20MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-    band50: {
-      enabled: true,
-      ssid: 'Home_WiFi_5G',
-      password: '',
-      securityMode: 'WPA2-PSK',
-      channel: 36,
-      channelWidth: '80MHz',
-      hidden: false,
-      txPower: '100%',
-    },
-  };
-
   async probeSignature(
     gatewayIp: string,
     port: number,
@@ -88,18 +65,7 @@ export class GenericRouterAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    const user = credentials.username || 'admin';
-    const pass = credentials.password || '';
-
-    if (!pass) {
-      return { success: false, error: 'Please enter router login credentials.' };
-    }
-
-    const auth = btoa(`${user}:${pass}`);
-    return {
-      success: true,
-      sessionToken: auth,
-    };
+    return { success: false, error: 'Generic adapter cannot guarantee compatibility. Please use a vendor-specific adapter.' };
   }
 
   async fetchWirelessConfig(
@@ -111,13 +77,7 @@ export class GenericRouterAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    return { success: false, error: 'Unsupported router API.' };
   }
 
   async applyWirelessConfig(
@@ -130,23 +90,7 @@ export class GenericRouterAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
-    }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-
-    return {
-      success: true,
-      rebootRequired: false,
-    };
+    return { success: false, error: 'Unsupported router API.' };
   }
 
   generateDirectScript(
@@ -157,20 +101,10 @@ export class GenericRouterAdapter extends BaseRouterAdapter {
     powershell: string;
     curl: string;
   } {
-    const user = credentials.username || 'admin';
-    const pass = credentials.password || '';
-    const auth = Buffer.from ? Buffer.from(`${user}:${pass}`).toString('base64') : btoa(`${user}:${pass}`);
-    const ssid24 = updates.band24?.ssid || 'Home_WiFi_2.4G';
-
-    const powershell = `# Standard TR-064 / HTTP Gateway Wireless Configuration
-$Headers = @{ "Authorization" = "Basic ${auth}" }
-Write-Host "Configuring Gateway Wi-Fi: ${ssid24}..." -ForegroundColor Cyan
-Write-Host "SUCCESS: Parameters committed." -ForegroundColor Green
-`;
-
-    const curl = `#!/bin/bash
-echo "Configuring gateway at ${endpoint}..."
-`;
-    return { powershell, curl };
+    return { 
+      powershell: '# Unsupported generic router - vendor API required',
+      curl: '# Unsupported generic router - vendor API required' 
+    };
   }
 }
+

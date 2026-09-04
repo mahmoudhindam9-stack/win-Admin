@@ -217,7 +217,37 @@ export abstract class BaseRouterAdapter implements RouterAdapter {
     curl: string;
   };
 
-  protected safeFetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 4000): Promise<Response> {
+  protected async safeFetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 4000): Promise<Response> {
+    if (window.electronAPI) {
+        const res = await window.electronAPI.routerApi('fetch', {
+           url,
+           options: {
+              ...options,
+              // AbortSignal can't be passed over IPC, we rely on standard timeouts or implement it in main.
+              // We'll trust the main process fetch
+           }
+        });
+
+        if (!res.success) {
+           throw new Error(res.error || 'Network request failed via IPC');
+        }
+
+        // Reconstruct a Response-like object
+        return {
+           ok: res.ok,
+           status: res.status,
+           statusText: res.statusText,
+           headers: new Headers(res.headers),
+           text: async () => res.body,
+           json: async () => JSON.parse(res.body),
+           blob: async () => new Blob([res.body]),
+           arrayBuffer: async () => new TextEncoder().encode(res.body).buffer,
+           clone: function() { return this; },
+           bodyUsed: false,
+           url: url,
+        } as Response;
+    }
+
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     return fetch(url, {

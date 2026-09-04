@@ -89,3 +89,14 @@ export interface ExecutionSummary {
   rebootRecommended: boolean;
 }
 
+declare global {
+  interface Window {
+    electronAPI?: {
+      getSystemMetrics: () => Promise<HardwareMetrics>;
+      executePowerShell: (script: string, elevate: boolean) => Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string }>;
+      onExecutionProgress: (callback: (data: { type: 'stdout' | 'stderr'; data: string }) => void) => () => void;
+      routerApi: (action: string, data?: any) => Promise<any>;
+    };
+  }
+}
+

@@ -69,51 +69,29 @@ export default function App() {
 
   // Real-time ticking telemetry loop (every 1000ms)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMetrics((prev) => {
-        // Natural small fluctuation
-        let targetCpu = isExecutingRef.current
-          ? Math.floor(48 + Math.random() * 22)
-          : Math.floor(16 + Math.random() * 8);
-
-        const newCpuHistory = [...prev.cpuHistory.slice(1), targetCpu];
-
-        // Small RAM drift
-        const ramDrift = (Math.random() - 0.5) * 0.05;
-        const newRamUsed = Math.max(4.0, Math.min(14.0, prev.ramUsedGB + ramDrift));
-        const newRamPercent = Math.round((newRamUsed / prev.ramTotalGB) * 100);
-        const newRamHistory = [...prev.ramHistory.slice(1), newRamPercent];
-
-        const clockVariance = 3.75 + Math.random() * 0.25;
-
-        // Active processes CPU update
-        const updatedProcesses = prev.topProcesses.map((p) => {
-          if (p.name === 'powershell.exe') {
-            return {
-              ...p,
-              cpuPercent: isExecutingRef.current
-                ? parseFloat((12.5 + Math.random() * 15).toFixed(1))
-                : 0.4,
-            };
+    const fetchMetrics = async () => {
+      if (window.electronAPI) {
+        try {
+          const realMetrics = await window.electronAPI.getSystemMetrics();
+          if (realMetrics) {
+            setMetrics(prev => {
+              const newCpuHistory = [...prev.cpuHistory.slice(1), realMetrics.cpuUsagePercent];
+              const newRamHistory = [...prev.ramHistory.slice(1), realMetrics.ramPercent];
+              return {
+                ...realMetrics,
+                cpuHistory: newCpuHistory,
+                ramHistory: newRamHistory
+              };
+            });
           }
-          if (p.name === 'chrome.exe') {
-            return { ...p, cpuPercent: parseFloat((2.5 + Math.random() * 2.5).toFixed(1)) };
-          }
-          return p;
-        });
+        } catch (e) {
+          console.error("Failed to fetch real telemetry:", e);
+        }
+      }
+    };
 
-        return {
-          ...prev,
-          cpuUsagePercent: targetCpu,
-          cpuClockSpeedGhz: parseFloat(clockVariance.toFixed(2)),
-          cpuHistory: newCpuHistory,
-          ramUsedGB: parseFloat(newRamUsed.toFixed(1)),
-          ramPercent: newRamPercent,
-          ramHistory: newRamHistory,
-          topProcesses: updatedProcesses,
-        };
-      });
-    }, 1000);
+    fetchMetrics(); // initial fetch
+    const interval = setInterval(fetchMetrics, 2000); // 2s interval is gentler on real hardware
 
     return () => clearInterval(interval);
   }, []);
@@ -164,39 +142,6 @@ export default function App() {
     setIsExecuting(false);
     setAutoStartTerminal(false);
     setLastReport(report);
-
-    // Apply realistic feedback to Live Hardware Telemetry
-    setMetrics((prev) => {
-      let updatedRamUsed = prev.ramUsedGB;
-      let updatedStandby = prev.ramStandbyGB;
-      let updatedDriveUsed = prev.driveUsedGB;
-
-      // If RAM was freed (e.g. SysMain or full)
-      if (report.memoryFreedMB > 0) {
-        const freedGB = report.memoryFreedMB / 1024;
-        updatedRamUsed = Math.max(4.2, prev.ramUsedGB - freedGB);
-        updatedStandby = Math.max(0.3, prev.ramStandbyGB - freedGB);
-      }
-
-      // If disk was freed
-      if (report.spaceFreedMB > 0) {
-        const freedGB = Math.round(report.spaceFreedMB / 1024);
-        updatedDriveUsed = Math.max(200, prev.driveUsedGB - freedGB);
-      }
-
-      const updatedRamPercent = Math.round((updatedRamUsed / prev.ramTotalGB) * 100);
-      const updatedRamHistory = [...prev.ramHistory.slice(1), updatedRamPercent];
-
-      return {
-        ...prev,
-        ramUsedGB: parseFloat(updatedRamUsed.toFixed(1)),
-        ramStandbyGB: parseFloat(updatedStandby.toFixed(1)),
-        ramPercent: updatedRamPercent,
-        ramHistory: updatedRamHistory,
-        driveUsedGB: updatedDriveUsed,
-        cpuUsagePercent: 18,
-      };
-    });
 
     // Automatically open simple report modal
     setIsReportModalOpen(true);

@@ -48,32 +48,9 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
   const supportedBrands = registry.getSupportedBrands();
 
   // Device & Connection State
-  const [deviceInfo, setDeviceInfo] = useState<RouterDeviceInfo>({
-    brand: 'openwrt',
-    brandName: 'OpenWrt',
-    model: 'OpenWrt Linux Wireless Router',
-    firmwareVersion: 'OpenWrt 23.05 (LuCI ubus)',
-    gatewayIp: '192.168.1.1',
-    port: 80,
-    protocol: 'http',
-    managementProtocol: 'ubus_jsonrpc',
-    authMethod: 'ubus_session',
-    supportedCapabilities: [
-      'wifi_24ghz',
-      'wifi_5ghz',
-      'wifi_password',
-      'security_mode',
-      'channel_selection',
-      'channel_width',
-      'hide_ssid',
-      'guest_network',
-      'tx_power',
-      'reboot',
-    ],
-    detectionConfidence: 'confirmed',
-  });
+  const [deviceInfo, setDeviceInfo] = useState<RouterDeviceInfo | null>(null);
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('detected');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectionLog, setDetectionLog] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -137,8 +114,6 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'wifi' | 'guest' | 'security' | 'direct'>('wifi');
-
-  const currentAdapter = registry.getAdapter(deviceInfo.brand);
 
   // Initial gateway detection
   useEffect(() => {
@@ -234,7 +209,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
 
     const endpoint = `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`;
     try {
-      const loginRes = await currentAdapter.login(endpoint, credentials);
+      const loginRes = await registry.getAdapter(deviceInfo!.brand).login(endpoint, credentials);
       if (!loginRes.success) {
         setConnectionStatus('error');
         setErrorMessage(loginRes.error || 'Authentication rejected by router.');
@@ -246,7 +221,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
       setConnectionStatus('connected');
 
       // Fetch live config
-      const configRes = await currentAdapter.fetchWirelessConfig(endpoint, token);
+      const configRes = await registry.getAdapter(deviceInfo!.brand).fetchWirelessConfig(endpoint, token);
       if (configRes.config) {
         setWirelessConfig(configRes.config);
         setOriginalConfig(configRes.config);
@@ -304,7 +279,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
     try {
       // Step 1: Apply to router
       setConnectionStatus('applying');
-      const applyRes = await currentAdapter.applyWirelessConfig(
+      const applyRes = await registry.getAdapter(deviceInfo!.brand).applyWirelessConfig(
         endpoint,
         sessionToken,
         wirelessConfig
@@ -321,7 +296,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
       // Brief pause to allow router firmware NVRAM/UCI commit to register
       await new Promise((r) => setTimeout(r, 600));
 
-      const vResult = await currentAdapter.verifyWirelessConfig(
+      const vResult = await registry.getAdapter(deviceInfo!.brand).verifyWirelessConfig(
         endpoint,
         sessionToken,
         wirelessConfig
@@ -344,6 +319,18 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = ({
       setIsVerifying(false);
     }
   };
+
+  if (!deviceInfo) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+        <RefreshCw className="w-8 h-8 text-cyan-500 animate-spin mb-4" />
+        <h2 className="text-lg font-semibold text-slate-200">Initializing Router Management...</h2>
+        <p className="text-sm mt-2">{detectionLog || 'Scanning for gateway...'}</p>
+      </div>
+    );
+  }
+
+  const currentAdapter = registry.getAdapter(deviceInfo.brand);
 
   const handleExportScript = () => {
     const endpoint = `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`;

@@ -117,10 +117,18 @@ export class MikroTikAdapter extends BaseRouterAdapter {
     const pass = credentials.password || '';
     const auth = btoa(`${user}:${pass}`);
 
-    return {
-      success: true,
-      sessionToken: auth,
-    };
+    try {
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/rest/system/resource`, {
+        method: 'GET',
+        headers: { 'Authorization': `Basic ${auth}` }
+      });
+      if (resp.ok) {
+         return { success: true, sessionToken: auth };
+      }
+      return { success: false, error: `RouterOS rejected credentials (Status: ${resp.status})` };
+    } catch (e: any) {
+      return { success: false, error: `Connection failed: ${e.message}` };
+    }
   }
 
   async fetchWirelessConfig(
@@ -132,13 +140,53 @@ export class MikroTikAdapter extends BaseRouterAdapter {
     error?: string;
     rawResponse?: any;
   }> {
-    return {
-      success: true,
-      config: {
-        ...this.activeConfigCache,
-        lastRetrieved: new Date().toLocaleTimeString(),
-      },
-    };
+    try {
+      const resp = await this.safeFetchWithTimeout(`${endpoint}/rest/interface/wireless`, {
+        method: 'GET',
+        headers: { 'Authorization': `Basic ${sessionToken}` }
+      });
+      if (resp.ok) {
+         const data = await resp.json();
+         let ssid24 = 'MikroTik-2.4G';
+         let ssid50 = 'MikroTik-5G';
+         
+         if (Array.isArray(data)) {
+            data.forEach((iface: any) => {
+               if (iface.name?.includes('wlan1') || iface.band?.includes('2ghz')) ssid24 = iface.ssid || ssid24;
+               if (iface.name?.includes('wlan2') || iface.band?.includes('5ghz')) ssid50 = iface.ssid || ssid50;
+            });
+         }
+         return {
+           success: true,
+           config: {
+             band24: {
+               enabled: true,
+               ssid: ssid24,
+               password: '',
+               securityMode: 'WPA2-PSK',
+               channel: 'auto',
+               channelWidth: '20MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             band50: {
+               enabled: true,
+               ssid: ssid50,
+               password: '',
+               securityMode: 'WPA2-PSK',
+               channel: 'auto',
+               channelWidth: '80MHz',
+               hidden: false,
+               txPower: '100%',
+             },
+             lastRetrieved: new Date().toLocaleTimeString(),
+           }
+         };
+      }
+      return { success: false, error: `Failed to fetch from RouterOS REST API (Status: ${resp.status})` };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   async applyWirelessConfig(
@@ -151,23 +199,25 @@ export class MikroTikAdapter extends BaseRouterAdapter {
     rebootRequired?: boolean;
     rawResponse?: any;
   }> {
-    if (updates.band24) {
-      this.activeConfigCache.band24 = {
-        ...this.activeConfigCache.band24!,
-        ...updates.band24,
-      };
+    try {
+      if (updates.band24) {
+         await this.safeFetchWithTimeout(`${endpoint}/rest/interface/wireless/*1`, {
+           method: 'PATCH',
+           headers: { 'Authorization': `Basic ${sessionToken}`, 'Content-Type': 'application/json' },
+           body: JSON.stringify({ ssid: updates.band24.ssid })
+         });
+      }
+      if (updates.band50) {
+         await this.safeFetchWithTimeout(`${endpoint}/rest/interface/wireless/*2`, {
+           method: 'PATCH',
+           headers: { 'Authorization': `Basic ${sessionToken}`, 'Content-Type': 'application/json' },
+           body: JSON.stringify({ ssid: updates.band50.ssid })
+         });
+      }
+      return { success: true, rebootRequired: false };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
-    if (updates.band50) {
-      this.activeConfigCache.band50 = {
-        ...this.activeConfigCache.band50!,
-        ...updates.band50,
-      };
-    }
-
-    return {
-      success: true,
-      rebootRequired: false,
-    };
   }
 
   generateDirectScript(
