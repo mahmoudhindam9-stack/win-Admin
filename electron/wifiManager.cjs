@@ -139,7 +139,81 @@ function parseNetworks(text) {
   return Array.from(map.values()).sort((a, b) => b.signal - a.signal || a.ssid.localeCompare(b.ssid));
 }
 
+// Active hardware Wi-Fi airwave scan using native Windows wlanapi.dll or Windows.Devices.WiFi:
+// Forces the physical Wi-Fi NIC to send 802.11 probe requests and populate fresh BSSID cache,
+// exactly like what happens when a user opens the Windows Wi-Fi flyout.
+let lastHardwareScanTime = 0;
+async function triggerActiveWlanHardwareScan() {
+  const now = Date.now();
+  if (now - lastHardwareScanTime < 3000) return; // Debounce hardware scan to once every 3 seconds
+  lastHardwareScanTime = now;
+
+  const triggerScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+try {
+  [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType = WindowsRuntime] | Out-Null
+  $adapters = [Windows.Devices.WiFi.WiFiAdapter]::FindAllAdaptersAsync().GetAwaiter().GetResult()
+  foreach ($a in $adapters) {
+    $a.ScanAsync().GetAwaiter().GetResult()
+  }
+} catch {
+  # Fallback to WlanScan via WlanAPI if WinRT is unavailable
+  try {
+    Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class WlanActiveProber {
+      [DllImport("wlanapi.dll")]
+      private static extern int WlanOpenHandle(uint dwClientVersion, IntPtr pReserved, out uint pdwNegotiatedVersion, out IntPtr phClientHandle);
+      [DllImport("wlanapi.dll")]
+      private static extern int WlanCloseHandle(IntPtr hClientHandle, IntPtr pReserved);
+      [DllImport("wlanapi.dll")]
+      private static extern int WlanEnumInterfaces(IntPtr hClientHandle, IntPtr pReserved, out IntPtr ppInterfaceList);
+      [DllImport("wlanapi.dll")]
+      private static extern int WlanScan(IntPtr hClientHandle, ref Guid pInterfaceGuid, IntPtr pDot11Ssid, IntPtr pIeData, IntPtr pReserved);
+      [DllImport("wlanapi.dll")]
+      private static extern void WlanFreeMemory(IntPtr pMemory);
+
+      public static void ScanAll() {
+        IntPtr client = IntPtr.Zero;
+        uint version = 0;
+        try {
+          if (WlanOpenHandle(2, IntPtr.Zero, out version, out client) != 0) return;
+          IntPtr ifaceListPtr = IntPtr.Zero;
+          if (WlanEnumInterfaces(client, IntPtr.Zero, out ifaceListPtr) != 0 || ifaceListPtr == IntPtr.Zero) return;
+          int count = Marshal.ReadInt32(ifaceListPtr);
+          IntPtr current = new IntPtr(ifaceListPtr.ToInt64() + 8);
+          for (int i = 0; i < count; i++) {
+            byte[] guidBytes = new byte[16];
+            Marshal.Copy(current, guidBytes, 0, 16);
+            Guid guid = new Guid(guidBytes);
+            WlanScan(client, ref guid, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            current = new IntPtr(current.ToInt64() + 532);
+          }
+          WlanFreeMemory(ifaceListPtr);
+        } catch {}
+        finally {
+          if (client != IntPtr.Zero) WlanCloseHandle(client, IntPtr.Zero);
+        }
+      }
+    }
+"@ -ErrorAction SilentlyContinue
+    [WlanActiveProber]::ScanAll()
+    Start-Sleep -Seconds 1
+  } catch {}
+}
+`;
+  await runPowerShellCommand(triggerScript);
+  // Wait just an additional 1s for the airwaves list to settle in the OS cache
+  await new Promise((r) => setTimeout(r, 1000));
+}
+
 async function scanNetworks() {
+  // Actively trigger physical Wi-Fi NIC probe request so results are updated in real-time
+  try {
+    await triggerActiveWlanHardwareScan();
+  } catch (_) {}
+
   let text = '';
   let networks = [];
 

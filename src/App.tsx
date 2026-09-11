@@ -47,11 +47,11 @@ export default function App() {
     cpuThreads: 16,
     cpuProcesses: 186,
     cpuHistory: [16, 18, 19, 21, 18, 17, 22, 19, 20, 18, 19, 17, 21, 23, 19, 18, 20, 19, 22, 19],
-    ramUsedGB: 4.3,
-    ramTotalGB: 7.7,
+    ramUsedGB: 5.5,
+    ramTotalGB: 15.7,
     ramStandbyGB: 0.4,
-    ramPercent: 56,
-    ramHistory: [56, 56, 57, 56, 56, 55, 56, 57, 56, 56, 57, 56, 56, 56, 57, 56, 56, 56, 57, 56],
+    ramPercent: 35,
+    ramHistory: [35, 35, 36, 35, 35, 34, 35, 36, 35, 35, 36, 35, 35, 35, 36, 35, 35, 35, 36, 35],
     virtualMemoryTotalGB: 8.0,
     virtualMemoryUsedGB: 1.2,
     totalCommittedGB: 15.7,
@@ -141,36 +141,11 @@ export default function App() {
           const realMetrics = await window.electronAPI.getSystemMetrics();
           if (realMetrics) {
             setMetrics(prev => {
-              let effCpu = realMetrics.cpuUsagePercent;
-              let effClock = realMetrics.cpuClockSpeedGhz;
-              let effProc = realMetrics.cpuProcesses;
-              if (isCpuOptimized) {
-                effCpu = Math.max(5, Math.min(12, Math.round(effCpu * 0.45)));
-                effClock = parseFloat(Math.max(2.65, effClock - 0.70).toFixed(2));
-                effProc = Math.max(160, effProc - 16);
-              }
-
-              let effRamUsed = realMetrics.ramUsedGB;
-              let effStandby = realMetrics.ramStandbyGB;
-              if (isRamOptimized) {
-                effRamUsed = parseFloat(Math.max(4.2, effRamUsed - 2.4).toFixed(1));
-                effStandby = 0.4;
-              }
-              const effRamPercent = Math.round((effRamUsed / realMetrics.ramTotalGB) * 100);
-              const effDriveUsed = parseFloat(Math.max(10, realMetrics.driveUsedGB - freedDiskGB).toFixed(1));
-
-              const newCpuHistory = [...prev.cpuHistory.slice(1), effCpu];
-              const newRamHistory = [...prev.ramHistory.slice(1), effRamPercent];
+              const newCpuHistory = [...prev.cpuHistory.slice(1), realMetrics.cpuUsagePercent];
+              const newRamHistory = [...prev.ramHistory.slice(1), realMetrics.ramPercent];
 
               return {
                 ...realMetrics,
-                cpuUsagePercent: effCpu,
-                cpuClockSpeedGhz: effClock,
-                cpuProcesses: effProc,
-                ramUsedGB: effRamUsed,
-                ramStandbyGB: effStandby,
-                ramPercent: effRamPercent,
-                driveUsedGB: effDriveUsed,
                 cpuHistory: newCpuHistory,
                 ramHistory: newRamHistory
               };

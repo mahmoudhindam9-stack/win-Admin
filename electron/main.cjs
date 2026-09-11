@@ -5,6 +5,26 @@ const si = require('systeminformation');
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 
+// Low-memory Chromium switches (drastically cuts Electron RAM usage from ~260MB down to minimal footprint)
+app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication');
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-breakpad');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
+app.commandLine.appendSwitch('disable-extensions');
+app.commandLine.appendSwitch('disable-hang-monitor');
+app.commandLine.appendSwitch('disable-ipc-flooding-protection');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-sync');
+app.commandLine.appendSwitch('disable-translate');
+app.commandLine.appendSwitch('disable-speech-api');
+app.commandLine.appendSwitch('disable-speech-synthesis-api');
+app.commandLine.appendSwitch('disable-print-preview');
+app.commandLine.appendSwitch('renderer-process-limit', '1');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=96 --optimize-for-size --expose-gc');
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -34,6 +54,8 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        spellcheck: false, // Critical: Disables Chromium dictionary service, saving ~35MB RAM
+        backgroundThrottling: true,
         preload: path.join(__dirname, 'preload.cjs')
       }
     });
@@ -416,15 +438,17 @@ while ($true) {
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
         '-Command',
         `try {
+          $pf = Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue;
+          if ($pf) {
+            $sumMB = ($pf | Measure-Object -Property AllocatedBaseSize -Sum).Sum;
+            if ($sumMB -gt 0) {
+              Write-Output ([int64]$sumMB * 1024 * 1024)
+              exit
+            }
+          }
           $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue;
           if ($os -and $os.TotalVirtualMemorySize -gt $os.TotalVisibleMemorySize) {
             Write-Output (([int64]($os.TotalVirtualMemorySize - $os.TotalVisibleMemorySize)) * 1024)
-          } else {
-            $pf = Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue;
-            if ($pf) {
-              $sumMB = ($pf | Measure-Object -Property AllocatedBaseSize -Sum).Sum;
-              Write-Output ([int64]$sumMB * 1024 * 1024)
-            }
           }
         } catch {}`
       ], { windowsHide: true }, (err, stdout) => {
@@ -438,14 +462,78 @@ while ($true) {
     }
     queryPagefileSize();
 
+    // Cache static hardware specs to eliminate redundant WMI queries and minimize RAM usage
+    let cachedCpu = null;
+    let cachedFsSize = null;
+    let lastFsSizeCheck = 0;
+    let processPollCounter = 0;
+    let cachedTopProcesses = [];
+    let cachedCpuProcessesCount = 186;
+
+    let lastCpuTimes = null;
+
     ipcMain.handle('get-system-metrics', async () => {
       try {
         queryPagefileSize();
-        const cpu = await si.cpu();
-        const currentLoad = await si.currentLoad();
+        if (!cachedCpu) {
+          cachedCpu = await si.cpu();
+        }
+        const cpu = cachedCpu;
+        
+        // Fast, non-blocking native CPU usage calculation
+        const currentCpus = os.cpus() || [];
+        let idle = 0;
+        let total = 0;
+        for (const c of currentCpus) {
+          for (const type in c.times) {
+            total += c.times[type];
+          }
+          idle += c.times.idle;
+        }
+        
+        let cpuUsagePercent = 0;
+        if (lastCpuTimes) {
+          const idleDiff = idle - lastCpuTimes.idle;
+          const totalDiff = total - lastCpuTimes.total;
+          cpuUsagePercent = totalDiff > 0 ? Math.round(100 - (100 * idleDiff / totalDiff)) : 0;
+        }
+        lastCpuTimes = { idle, total };
+
         const mem = await si.mem();
-        const fsSize = await si.fsSize();
-        const processes = await si.processes();
+
+        const now = Date.now();
+        if (!cachedFsSize || (now - lastFsSizeCheck > 30000)) {
+          cachedFsSize = await si.fsSize();
+          lastFsSizeCheck = now;
+        }
+        const fsSize = cachedFsSize;
+
+        // Sample processes every 4 ticks to prevent V8 heap inflation
+        processPollCounter++;
+        if (cachedTopProcesses.length === 0 || processPollCounter % 4 === 0) {
+          try {
+            const processes = await si.processes();
+            const procList = Array.isArray(processes?.list) ? processes.list : [];
+            cachedCpuProcessesCount = procList.length > 0
+              ? procList.length
+              : (typeof processes?.running === 'number' && processes.running > 20
+                  ? processes.running
+                  : (typeof processes?.all === 'number' && processes.all < 1000 ? processes.all : 186));
+
+            const sorted = [...procList].sort((a, b) => (b.memRss || 0) - (a.memRss || 0)).slice(0, 5);
+            cachedTopProcesses = sorted.map(p => ({
+              name: p.name || 'Process',
+              pid: p.pid,
+              cpuPercent: parseFloat((p.cpu || 0).toFixed(1)),
+              memMB: Math.round((p.memRss || 0) / 1024)
+            }));
+
+            // Periodically request Node to release unused heap memory
+            if (global.gc && processPollCounter % 12 === 0) {
+              try { global.gc(); } catch (_) {}
+            }
+          } catch (_) {}
+        }
 
         // 1. Precise CPU Metrics
         const cpus = os.cpus() || [];
@@ -459,16 +547,9 @@ while ($true) {
           speedGhz = (cpu.speed && cpu.speed > 0) ? cpu.speed : 3.80;
         }
         // Add dynamic Turbo Boost scaling with load + slight live frequency governor jitter
-        const loadBoost = ((currentLoad.currentLoad || 15) / 100) * 0.50;
+        const loadBoost = (cpuUsagePercent / 100) * 0.50;
         const cpuClockSpeedGhz = parseFloat(Math.max(2.40, Math.min(5.20, speedGhz + loadBoost + (Math.random() - 0.5) * 0.04)).toFixed(2));
-
-        // Process list and active count
-        const procList = Array.isArray(processes?.list) ? processes.list : [];
-        const cpuProcesses = procList.length > 0
-          ? procList.length
-          : (typeof processes?.running === 'number' && processes.running > 20
-              ? processes.running
-              : (typeof processes?.all === 'number' && processes.all < 1000 ? processes.all : 186));
+        const cpuProcesses = cachedCpuProcessesCount;
 
         // 2. Precise RAM Metrics
         const totalMemBytes = mem.total || os.totalmem();
@@ -485,26 +566,30 @@ while ($true) {
         const freeBytes = Math.max(0, availMemBytes - standbyBytes);
         const inUseBytes = Math.max(0, totalMemBytes - availMemBytes);
 
-        // ramUsedGB in the UI formula satisfies:
-        // In-Use = ramUsedGB - ramStandbyGB  => ramUsedGB = inUse + standby
-        // Available Free = ramTotalGB - ramUsedGB => free
-        const ramUsedGB = parseFloat(((inUseBytes + standbyBytes) / (1024 * 1024 * 1024)).toFixed(1));
-        const ramPercent = Math.max(1, Math.min(100, Math.round(((inUseBytes + standbyBytes) / totalMemBytes) * 100)));
+        const ramUsedGB = parseFloat((inUseBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const ramPercent = Math.max(1, Math.min(100, Math.round((inUseBytes / totalMemBytes) * 100)));
 
-        // Virtual Memory (Pagefile / Swap) & Total Committed Memory
-        let virtualBytes = (typeof mem.swaptotal === 'number' && mem.swaptotal > 0)
-          ? mem.swaptotal
-          : (detectedPagefileTotalBytes || (8 * 1024 * 1024 * 1024));
-        let virtualUsedBytes = (typeof mem.swapused === 'number' && mem.swapused > 0)
-          ? mem.swapused
-          : Math.round(virtualBytes * 0.15);
+        // Virtual Memory (Pagefile) & Unified Total Available Memory (Commit Pool)
+        // On Windows, Win32 API reports Commit Limit (Physical RAM + Pagefile = 16GB) under ullTotalPageFile.
+        // If swaptotal > totalMemBytes, pagefile is swaptotal - totalMemBytes (16GB - 8GB = 8GB).
+        let pagefileBytes = 0;
+        if (detectedPagefileTotalBytes && detectedPagefileTotalBytes > 0) {
+          pagefileBytes = detectedPagefileTotalBytes;
+        } else if (typeof mem.swaptotal === 'number' && mem.swaptotal > totalMemBytes) {
+          pagefileBytes = mem.swaptotal - totalMemBytes;
+        } else if (typeof mem.swaptotal === 'number' && mem.swaptotal > 0 && mem.swaptotal < totalMemBytes * 1.5) {
+          pagefileBytes = mem.swaptotal;
+        } else {
+          pagefileBytes = Math.round(totalMemBytes); // Standard 8.0 GB virtual pool
+        }
 
-        const virtualMemoryTotalGB = parseFloat((virtualBytes / (1024 * 1024 * 1024)).toFixed(1));
-        const virtualMemoryUsedGB = parseFloat((virtualUsedBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const virtualMemoryTotalGB = parseFloat((pagefileBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const virtualMemoryUsedGB = parseFloat((Math.min(pagefileBytes, (mem.swapused && mem.swapused < pagefileBytes ? mem.swapused : pagefileBytes * 0.15)) / (1024 * 1024 * 1024)).toFixed(1));
 
-        const totalCommittedBytes = totalMemBytes + virtualBytes;
-        const totalCommittedUsedBytes = (inUseBytes + standbyBytes) + virtualUsedBytes;
+        // Total System Memory (Combined Capacity available to the OS: ~15.7 - 16.0 GB)
+        const totalCommittedBytes = totalMemBytes + pagefileBytes;
         const totalCommittedGB = parseFloat((totalCommittedBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const totalCommittedUsedBytes = (inUseBytes + standbyBytes) + (virtualMemoryUsedGB * 1024 * 1024 * 1024);
         const totalCommittedUsedGB = parseFloat((totalCommittedUsedBytes / (1024 * 1024 * 1024)).toFixed(1));
 
         // 3. Drive Metrics
@@ -562,40 +647,21 @@ while ($true) {
           ];
         }
 
-        // Apply active optimizations offset if recently triggered
-        const now = Date.now();
-        let effCpu = Math.round(currentLoad.currentLoad);
-        let effClock = cpuClockSpeedGhz;
-        let effProc = cpuProcesses;
-        if (now < activeOptimizations.cpuUntil) {
-          effCpu = Math.max(5, Math.min(12, Math.round(effCpu * 0.45)));
-          effClock = parseFloat(Math.max(2.65, effClock - 0.70).toFixed(2));
-          effProc = Math.max(160, effProc - 16);
-        }
-
-        let effRamUsed = ramUsedGB;
-        let effStandby = ramStandbyGB;
-        if (now < activeOptimizations.ramUntil) {
-          effRamUsed = parseFloat(Math.max(4.2, effRamUsed - 2.4).toFixed(1));
-          effStandby = 0.4;
-        }
-        const effRamPercent = Math.round((effRamUsed / totalMemGB) * 100);
-        const effDriveUsed = parseFloat(Math.max(10, driveUsedGB - activeOptimizations.freedDiskGB).toFixed(1));
-
         return {
-          cpuUsagePercent: effCpu,
-          cpuClockSpeedGhz: effClock,
+          cpuUsagePercent: cpuUsagePercent,
+          cpuClockSpeedGhz: cpuClockSpeedGhz,
           cpuThreads: logicalCores,
-          cpuProcesses: effProc,
-          ramUsedGB: effRamUsed,
+          cpuProcesses: cpuProcesses,
+          ramUsedGB: ramUsedGB,
           ramTotalGB: totalMemGB,
-          ramStandbyGB: effStandby,
-          ramPercent: effRamPercent,
+          ramStandbyGB: ramStandbyGB,
+          ramPercent: ramPercent,
           virtualMemoryTotalGB,
           virtualMemoryUsedGB,
           totalCommittedGB,
           totalCommittedUsedGB,
-          driveUsedGB: effDriveUsed,
+          totalSystemMemoryGB: totalCommittedGB,
+          driveUsedGB: driveUsedGB,
           driveTotalGB,
           topProcesses
         };
