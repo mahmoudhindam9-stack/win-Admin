@@ -47,11 +47,15 @@ export default function App() {
     cpuThreads: 16,
     cpuProcesses: 186,
     cpuHistory: [16, 18, 19, 21, 18, 17, 22, 19, 20, 18, 19, 17, 21, 23, 19, 18, 20, 19, 22, 19],
-    ramUsedGB: 9.8,
-    ramTotalGB: 16.0,
-    ramStandbyGB: 2.1,
-    ramPercent: 61,
-    ramHistory: [61, 61, 62, 61, 61, 60, 61, 62, 61, 61, 62, 61, 61, 61, 62, 61, 61, 61, 62, 61],
+    ramUsedGB: 4.3,
+    ramTotalGB: 7.7,
+    ramStandbyGB: 0.4,
+    ramPercent: 56,
+    ramHistory: [56, 56, 57, 56, 56, 55, 56, 57, 56, 56, 57, 56, 56, 56, 57, 56, 56, 56, 57, 56],
+    virtualMemoryTotalGB: 8.0,
+    virtualMemoryUsedGB: 1.2,
+    totalCommittedGB: 15.7,
+    totalCommittedUsedGB: 5.5,
     driveUsedGB: 283.0,
     driveTotalGB: 512,
     topProcesses: [
@@ -228,6 +232,11 @@ export default function App() {
           });
           updatedTopProcesses.sort((a, b) => b.memMB - a.memMB);
 
+          const virtTotal = prev.virtualMemoryTotalGB || 8.0;
+          const virtUsed = prev.virtualMemoryUsedGB || 1.2;
+          const totalCommitted = parseFloat((prev.ramTotalGB + virtTotal).toFixed(1));
+          const totalCommittedUsed = parseFloat((targetRamUsed + virtUsed).toFixed(1));
+
           return {
             ...prev,
             cpuUsagePercent: targetCpu,
@@ -238,6 +247,10 @@ export default function App() {
             ramStandbyGB: targetStandby,
             ramPercent: targetRamPercent,
             ramHistory: [...prev.ramHistory.slice(1), targetRamPercent],
+            virtualMemoryTotalGB: virtTotal,
+            virtualMemoryUsedGB: virtUsed,
+            totalCommittedGB: totalCommitted,
+            totalCommittedUsedGB: totalCommittedUsed,
             driveUsedGB: targetDriveUsed,
             topProcesses: updatedTopProcesses
           };

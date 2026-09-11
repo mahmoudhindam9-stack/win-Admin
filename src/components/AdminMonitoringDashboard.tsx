@@ -426,13 +426,18 @@ export const AdminMonitoringDashboard: React.FC<AdminMonitoringDashboardProps> =
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-400 font-medium">{metrics.ramTotalGB.toFixed(1)} GB Physical RAM</p>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      {metrics.ramTotalGB.toFixed(1)} GB Physical + {(metrics.virtualMemoryTotalGB ?? 8.0).toFixed(1)} GB Virtual
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-light tracking-tight text-emerald-400">
                     {metrics.ramPercent}<span className="text-lg text-emerald-700">%</span>
                   </div>
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    {(metrics.totalCommittedGB ?? (metrics.ramTotalGB + (metrics.virtualMemoryTotalGB ?? 8.0))).toFixed(1)} GB Pool
+                  </p>
                 </div>
               </div>
 
@@ -441,19 +446,52 @@ export const AdminMonitoringDashboard: React.FC<AdminMonitoringDashboardProps> =
                 {renderSparkline(metrics.ramHistory, 100, '#10b981')}
               </div>
 
-              {/* Data Rows */}
-              <div className="space-y-3 mb-8 text-xs font-medium">
+              {/* Data Rows: Physical RAM, Virtual Memory (Pagefile), Total Committed Pool, and Free */}
+              <div className="space-y-2.5 mb-8 text-xs font-medium">
                 <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
-                  <span className="text-slate-500">In-Use Memory</span>
-                  <span className="text-slate-200 font-mono">{Math.max(0, metrics.ramUsedGB - metrics.ramStandbyGB).toFixed(1)} GB</span>
+                  <span className="text-slate-400 flex items-center space-x-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                    <span>Physical RAM</span>
+                  </span>
+                  <span className="text-slate-200 font-mono font-semibold">
+                    {metrics.ramTotalGB.toFixed(1)} GB{' '}
+                    <span className="text-slate-500 font-normal text-[11px]">
+                      ({Math.max(0, metrics.ramUsedGB - metrics.ramStandbyGB).toFixed(1)} GB used)
+                    </span>
+                  </span>
                 </div>
+
                 <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
-                  <span className="text-slate-500">Standby Cache</span>
-                  <span className="text-emerald-400 font-mono">{metrics.ramStandbyGB.toFixed(1)} GB</span>
+                  <span className="text-slate-400 flex items-center space-x-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block" />
+                    <span>Virtual Memory (Pagefile)</span>
+                  </span>
+                  <span className="text-cyan-300 font-mono font-semibold">
+                    {(metrics.virtualMemoryTotalGB ?? 8.0).toFixed(1)} GB{' '}
+                    <span className="text-slate-500 font-normal text-[11px]">
+                      ({(metrics.virtualMemoryUsedGB ?? 1.2).toFixed(1)} GB used)
+                    </span>
+                  </span>
                 </div>
+
                 <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
-                  <span className="text-slate-500">Available Free</span>
-                  <span className="text-slate-200 font-mono">{Math.max(0, metrics.ramTotalGB - metrics.ramUsedGB).toFixed(1)} GB</span>
+                  <span className="text-slate-400 flex items-center space-x-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block" />
+                    <span>Total Committed Memory</span>
+                  </span>
+                  <span className="text-purple-300 font-mono font-semibold">
+                    {(metrics.totalCommittedGB ?? (metrics.ramTotalGB + (metrics.virtualMemoryTotalGB ?? 8.0))).toFixed(1)} GB{' '}
+                    <span className="text-slate-500 font-normal text-[11px]">
+                      (Available Pool)
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center pt-0.5 text-[11px]">
+                  <span className="text-slate-500">Standby Cache / Free RAM</span>
+                  <span className="text-slate-300 font-mono">
+                    <span className="text-emerald-400">{metrics.ramStandbyGB.toFixed(1)} GB</span> / {Math.max(0, metrics.ramTotalGB - metrics.ramUsedGB).toFixed(1)} GB
+                  </span>
                 </div>
               </div>
             </div>

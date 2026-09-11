@@ -50,6 +50,10 @@ export interface HardwareMetrics {
   ramStandbyGB: number;
   ramPercent: number;
   ramHistory: number[];
+  virtualMemoryTotalGB?: number;
+  virtualMemoryUsedGB?: number;
+  totalCommittedGB?: number;
+  totalCommittedUsedGB?: number;
   driveUsedGB: number;
   driveTotalGB: number;
   topProcesses: { name: string; pid: number; cpuPercent: number; memMB: number }[];
@@ -105,6 +109,13 @@ type UpdateStatusCallback = (data: {
 
 declare global {
   interface Window {
+    chrome?: {
+      webview?: {
+        postMessage: (message: any) => void;
+        addEventListener: (event: string, handler: (event: any) => void) => void;
+        removeEventListener: (event: string, handler: (event: any) => void) => void;
+      };
+    };
     electronAPI?: {
       getSystemMetrics: () => Promise<HardwareMetrics>;
       checkElevation: () => Promise<boolean>;
@@ -116,6 +127,7 @@ declare global {
       downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
       installUpdate: () => Promise<{ success: boolean; reason?: string; error?: string }>;
       getAppVersion: () => Promise<string>;
+      openExternal?: (url: string) => Promise<{ success: boolean; error?: string }>;
       onUpdateStatus: (callback: UpdateStatusCallback) => () => void;
     };
   }

@@ -5,6 +5,8 @@ import { TPLinkAdapter } from './adapters/tplink';
 import { NetgearAdapter } from './adapters/netgear';
 import { DLinkAdapter } from './adapters/dlink';
 import { MikroTikAdapter } from './adapters/mikrotik';
+import { ZTEAdapter } from './adapters/zte';
+import { HuaweiAdapter } from './adapters/huawei';
 import { GenericRouterAdapter } from './adapters/generic';
 
 export class RouterAdapterRegistry {
@@ -12,12 +14,14 @@ export class RouterAdapterRegistry {
   private adapters: Map<RouterBrand, RouterAdapter> = new Map();
 
   private constructor() {
-    this.register(new OpenWrtAdapter());
-    this.register(new AsuswrtAdapter());
+    this.register(new ZTEAdapter());
+    this.register(new HuaweiAdapter());
     this.register(new TPLinkAdapter());
+    this.register(new AsuswrtAdapter());
     this.register(new NetgearAdapter());
     this.register(new DLinkAdapter());
     this.register(new MikroTikAdapter());
+    this.register(new OpenWrtAdapter());
     this.register(new GenericRouterAdapter());
   }
 
@@ -86,13 +90,7 @@ export class RouterAdapterRegistry {
 
     let matchedAdapter = this.getAdapter(bestProbe.brand);
     if (!bestProbe.matches || bestProbe.confidence < 50) {
-      // Check if the IP matches any default gateway list
-      for (const adapter of this.adapters.values()) {
-        if (adapter.defaultGateways.includes(gatewayIp)) {
-          matchedAdapter = adapter;
-          break;
-        }
-      }
+      matchedAdapter = this.getAdapter('generic');
     }
 
     const deviceInfo: RouterDeviceInfo = {

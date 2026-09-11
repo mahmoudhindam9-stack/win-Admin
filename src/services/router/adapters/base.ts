@@ -287,9 +287,8 @@ export abstract class BaseRouterAdapter implements RouterAdapter {
            url,
            options: {
               ...options,
-              // AbortSignal can't be passed over IPC, we rely on standard timeouts or implement it in main.
-              // We'll trust the main process fetch
-           }
+           },
+           timeoutMs,
         });
 
         if (!res.success) {

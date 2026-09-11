@@ -6,7 +6,9 @@ export type RouterBrand =
   | 'netgear'
   | 'dlink'
   | 'mikrotik'
-  | 'ubiquiti';
+  | 'ubiquiti'
+  | 'zte'
+  | 'huawei';
 
 export type ManagementProtocol =
   | 'ubus_jsonrpc'
@@ -15,6 +17,8 @@ export type ManagementProtocol =
   | 'netgear_soap'
   | 'dlink_hnap'
   | 'mikrotik_rest'
+  | 'zte_web'
+  | 'huawei_api'
   | 'generic_tr064'
   | 'web_form';
 

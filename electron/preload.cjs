@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadUpdate: () => ipcRenderer.invoke('update-download'),
   installUpdate: () => ipcRenderer.invoke('update-install'),
   getAppVersion: () => ipcRenderer.invoke('app-version'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onUpdateStatus: (callback) => {
     const handler = (event, data) => callback(data);
     ipcRenderer.on('update-status', handler);

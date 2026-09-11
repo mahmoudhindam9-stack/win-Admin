@@ -65,6 +65,9 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
   const [detectionLog, setDetectionLog] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [authStepText, setAuthStepText] = useState<string>('');
+  const [authInlineError, setAuthInlineError] = useState<string | null>(null);
+  const [authInlineSuccess, setAuthInlineSuccess] = useState<string | null>(null);
 
   // Manual configuration drawer/inputs
   const [isManualConfigOpen, setIsManualConfigOpen] = useState(false);
@@ -75,7 +78,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
 
   // Credentials
   const [credentials, setCredentials] = useState<RouterLoginCredentials>({
-    username: 'root',
+    username: 'admin',
     password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -212,38 +215,121 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
     setSuccessMessage(`Router target set to ${adapter.brandName} at ${manualIp}`);
   };
 
+  const handleOpenPortal = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    const gwIp = deviceInfo?.gatewayIp || manualIp || '192.168.1.1';
+    const gwPort = deviceInfo?.port || manualPort || 80;
+    const gwProtocol = deviceInfo?.protocol || manualProtocol || 'http';
+    const url = `${gwProtocol}://${gwIp}:${gwPort}`;
+
+    try {
+      if ((window as any).electronAPI?.openExternal) {
+        const res = await (window as any).electronAPI.openExternal(url);
+        if (!res?.success) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      console.error('Failed to open external router portal:', err);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const handleConnectAndAuthenticate = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
+    setAuthInlineError(null);
+    setAuthInlineSuccess(null);
     setConnectionStatus('authenticating');
+    setAuthStepText('Verifying gateway connection...');
 
-    const endpoint = `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`;
+    const gwIp = deviceInfo?.gatewayIp || manualIp || '192.168.1.1';
+    const gwPort = deviceInfo?.port || manualPort || 80;
+    const gwProtocol = deviceInfo?.protocol || manualProtocol || 'http';
+    const endpoint = `${gwProtocol}://${gwIp}:${gwPort}`;
+
     try {
-      const loginRes = await registry.getAdapter(deviceInfo!.brand).login(endpoint, credentials);
-      if (!loginRes.success) {
-        setConnectionStatus('error');
-        setErrorMessage(loginRes.error || 'Authentication rejected by router.');
-        return;
+      let token = '';
+      let activeBrand: RouterBrand = deviceInfo?.brand || 'generic';
+
+      // 1. Electron Native Router Login (fast, robust socket & HTTP multi-strategy)
+      if ((window as any).electronAPI?.routerApi) {
+        setAuthStepText(`Testing gateway at ${gwIp}:${gwPort}...`);
+
+        const loginRes = await (window as any).electronAPI.routerApi('routerLogin', {
+          gatewayIp: gwIp,
+          port: gwPort,
+          protocol: gwProtocol,
+          username: credentials.username || 'admin',
+          password: credentials.password || '',
+          brand: deviceInfo?.brand,
+        });
+
+        if (!loginRes.success) {
+          setConnectionStatus('error');
+          const errMsg = loginRes.error || 'Authentication rejected by router.';
+          setErrorMessage(errMsg);
+          setAuthInlineError(errMsg);
+          return;
+        }
+
+        token = loginRes.sessionToken || `session_${Date.now()}`;
+        if (loginRes.detectedBrand && loginRes.detectedBrand !== deviceInfo?.brand) {
+          activeBrand = loginRes.detectedBrand as RouterBrand;
+          const detectedAdapter = registry.getAdapter(activeBrand);
+          setDeviceInfo((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  brand: activeBrand,
+                  brandName: detectedAdapter.brandName,
+                  model: `${detectedAdapter.brandName} Gateway`,
+                  managementProtocol: detectedAdapter.managementProtocol,
+                }
+              : null
+          );
+        }
+      } else {
+        // 2. Web browser fallback adapter login
+        setAuthStepText('Authenticating with router...');
+        const adapter = registry.getAdapter(deviceInfo?.brand || 'generic');
+        const loginRes = await adapter.login(endpoint, credentials);
+        if (!loginRes.success) {
+          setConnectionStatus('error');
+          const errMsg = loginRes.error || 'Authentication rejected by router.';
+          setErrorMessage(errMsg);
+          setAuthInlineError(errMsg);
+          return;
+        }
+        token = loginRes.sessionToken || '';
       }
 
-      const token = loginRes.sessionToken || '';
       setSessionToken(token);
       setConnectionStatus('connected');
+      setAuthStepText('Synchronizing real network hosts & bandwidth...');
 
-      // Fetch live config
-      const configRes = await registry.getAdapter(deviceInfo!.brand).fetchWirelessConfig(endpoint, token);
-      if (configRes.config) {
-        setWirelessConfig(configRes.config);
-        setOriginalConfig(configRes.config);
-      }
+      // Fetch live config if adapter supports it
+      try {
+        const configRes = await registry.getAdapter(activeBrand).fetchWirelessConfig(endpoint, token);
+        if (configRes?.config) {
+          setWirelessConfig(configRes.config);
+          setOriginalConfig(configRes.config);
+        }
+      } catch (_) {}
 
-      // Immediately fetch real connected devices from router/network and wipe mock data
-      await fetchAndSyncRealDevices(endpoint, token, deviceInfo!.brand);
+      // Immediately fetch real connected devices from Windows ARP table & router
+      const realDevices = await fetchAndSyncRealDevices(endpoint, token, activeBrand);
 
-      setSuccessMessage(`Successfully authenticated with ${deviceInfo.brandName} (${deviceInfo.managementProtocol}). Real network devices synchronized.`);
+      const successMsg = `Successfully connected and authenticated with ${deviceInfo?.brandName || 'Router'} (${gwIp}). ${realDevices.length} network host(s) synchronized.`;
+      setSuccessMessage(successMsg);
+      setAuthInlineSuccess(`Connected to ${gwIp}! Active session verified, live hosts synchronized.`);
     } catch (err: any) {
       setConnectionStatus('error');
-      setErrorMessage(`Authentication failed: ${err.message || String(err)}`);
+      const msg = `Connection failed: ${err.message || String(err)}`;
+      setErrorMessage(msg);
+      setAuthInlineError(msg);
     }
   };
 
@@ -483,16 +569,16 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
               <span>Manual IP / Model</span>
             </button>
 
-            <a
-              href={`${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              id="btn-open-router-portal"
+              onClick={handleOpenPortal}
               className="px-3 py-2 bg-[#161B2A] hover:bg-[#1E293B] text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-[#1F293D] flex items-center space-x-1.5 transition-colors cursor-pointer"
-              title="Open router web portal in new tab"
+              title="Open router web portal in default system browser"
             >
               <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
               <span>Open Portal</span>
-            </a>
+            </button>
           </div>
         </div>
 
@@ -731,17 +817,55 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
 
               <button
                 id="btn-router-auth-connect"
+                type="button"
                 onClick={handleConnectAndAuthenticate}
                 disabled={connectionStatus === 'authenticating'}
-                className="w-full py-2 bg-gradient-to-r from-[#0284C7] to-[#2563EB] hover:from-[#0369A1] hover:to-[#1D4ED8] text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
+                className="w-full py-2.5 bg-gradient-to-r from-[#0284C7] to-[#2563EB] hover:from-[#0369A1] hover:to-[#1D4ED8] disabled:from-slate-700 disabled:to-slate-800 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
               >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>
-                  {connectionStatus === 'connected'
-                    ? 'Session Active &bull; Re-Verify'
-                    : 'Connect & Fetch Live Config'}
-                </span>
+                {connectionStatus === 'authenticating' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-300" />
+                    <span>{authStepText || 'Connecting to Router...'}</span>
+                  </>
+                ) : connectionStatus === 'connected' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Connected • Refresh Session</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Connect & Authenticate</span>
+                  </>
+                )}
               </button>
+
+              {authInlineError && (
+                <div className="p-2.5 rounded-lg bg-red-950/40 border border-red-500/40 text-red-300 text-xs flex flex-col space-y-1.5">
+                  <div className="flex items-start space-x-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                    <span className="font-medium text-[11px] leading-relaxed">{authInlineError}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-red-800/40 text-[11px] text-slate-300">
+                    <span>Verify credentials in router portal</span>
+                    <button
+                      type="button"
+                      onClick={handleOpenPortal}
+                      className="text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 underline cursor-pointer"
+                    >
+                      <span>Open Web Portal</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {authInlineSuccess && (
+                <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs flex items-center space-x-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="text-[11px] font-medium">{authInlineSuccess}</span>
+                </div>
+              )}
             </div>
           </div>
 

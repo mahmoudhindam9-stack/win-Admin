@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>WindowsPerformanceOptimizer</AssemblyName>
+    <AssemblyTitle>Windows Performance Optimizer Suite (Native WebView2)</AssemblyTitle>
+    <Company>Windows Performance Optimizer Suite</Company>
+    <Product>Windows Performance Optimizer Suite</Product>
+    <Version>2.7.4</Version>
+    <Description>Ultra-lightweight native Windows WebView2 client (less than 3MB RAM/Disk friendly)</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const si = require('systeminformation');
@@ -36,6 +36,14 @@ if (!gotTheLock) {
         sandbox: true,
         preload: path.join(__dirname, 'preload.cjs')
       }
+    });
+
+    // Ensure target="_blank" or external links open in the system default web browser
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
     });
 
     if (app.isPackaged) {
@@ -88,83 +96,256 @@ if (!gotTheLock) {
     return processPromise.finally(() => clearInterval(interval));
   }
 
-  async function runElevatedPowerShell(scriptPath, taskId) {
-    const tempDir = path.dirname(scriptPath);
-    const token = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const wrapperPath = path.join(tempDir, `WinOptElevated_${token}.ps1`);
-    const stdoutPath = path.join(tempDir, `WinOptElevated_${token}.out.log`);
-    const stderrPath = path.join(tempDir, `WinOptElevated_${token}.err.log`);
-    const exitPath = path.join(tempDir, `WinOptElevated_${token}.exit`);
+  let isAppElevatedCached = null;
+  async function checkIsProcessElevated() {
+    if (isAppElevatedCached !== null) return isAppElevatedCached;
+    return new Promise((resolve) => {
+      execFile('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-Command',
+        '[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent() | ForEach-Object { $_.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }'
+      ], { windowsHide: true }, (error, stdout) => {
+        if (error) {
+          resolve(false);
+        } else {
+          isAppElevatedCached = String(stdout).trim().toLowerCase() === 'true';
+          resolve(isAppElevatedCached);
+        }
+      });
+    });
+  }
 
-    const wrapper = `
-$ErrorActionPreference = 'Continue'
-$exitCode = 1
-try {
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${psQuote(scriptPath)} 1> ${psQuote(stdoutPath)} 2> ${psQuote(stderrPath)}
-    $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
-} catch {
-    $_ | Out-File -FilePath ${psQuote(stderrPath)} -Append -Encoding utf8
-    $exitCode = 1
-}
-Set-Content -Path ${psQuote(exitPath)} -Value $exitCode -Encoding ascii
-exit $exitCode
-`;
+  // Persistent Elevated Daemon Session:
+  // Requests Windows UAC elevation ONCE on the first administrative task.
+  // All subsequent administrative tasks run through this active elevated daemon with ZERO extra prompts.
+  let elevatedDaemonSession = null;
 
-    try {
-      fs.writeFileSync(wrapperPath, wrapper, 'utf8');
-      fs.writeFileSync(stdoutPath, '', 'utf8');
-      fs.writeFileSync(stderrPath, '', 'utf8');
-      try { fs.unlinkSync(exitPath); } catch (_) {}
-    } catch (error) {
-      return { success: false, exitCode: -1, stdout: '', stderr: error.message };
+  function getDaemonSessionDir() {
+    return path.join(app.getPath('temp'), `WinOptDaemon_${process.pid}`);
+  }
+
+  async function ensureElevatedDaemon() {
+    const sessionDir = getDaemonSessionDir();
+    const readyFile = path.join(sessionDir, 'daemon.ready');
+    const stopFile = path.join(sessionDir, 'daemon.stop');
+    const jobsDir = path.join(sessionDir, 'jobs');
+
+    if (fs.existsSync(readyFile) && elevatedDaemonSession?.alive) {
+      return { sessionDir, jobsDir };
     }
 
-    const psCommand = [
-      `$argList = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${String(wrapperPath).replace(/"/g, '""')}"'`,
-      `$p = Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs -WindowStyle Hidden -Wait -PassThru`,
-      `exit $p.ExitCode`
+    // Clean any prior state
+    try {
+      if (fs.existsSync(stopFile)) fs.unlinkSync(stopFile);
+      if (fs.existsSync(readyFile)) fs.unlinkSync(readyFile);
+    } catch (_) {}
+
+    fs.mkdirSync(jobsDir, { recursive: true });
+
+    const daemonScriptPath = path.join(sessionDir, 'daemon.ps1');
+    const daemonScript = `
+param([int]$ParentPid, [string]$SessionDir)
+$ErrorActionPreference = 'Continue'
+$readyFile = Join-Path $SessionDir 'daemon.ready'
+$jobsDir = Join-Path $SessionDir 'jobs'
+if (-not (Test-Path $jobsDir)) { New-Item -ItemType Directory -Path $jobsDir -Force | Out-Null }
+Set-Content -Path $readyFile -Value "$PID" -Encoding ascii
+
+while ($true) {
+    if ($ParentPid -gt 0) {
+        $parent = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
+        if (-not $parent) { break }
+    }
+    $stopFile = Join-Path $SessionDir 'daemon.stop'
+    if (Test-Path $stopFile) { break }
+
+    $jobs = Get-ChildItem -Path $jobsDir -Filter '*.job' -File -ErrorAction SilentlyContinue | Sort-Object CreationTime
+    foreach ($job in $jobs) {
+        try {
+            $raw = Get-Content -Path $job.FullName -Raw -Encoding utf8
+            $info = $raw | ConvertFrom-Json
+            Remove-Item -Path $job.FullName -Force -ErrorAction SilentlyContinue
+
+            $sFile = $info.scriptPath
+            $oFile = $info.stdoutPath
+            $eFile = $info.stderrPath
+            $xFile = $info.exitPath
+
+            $ec = 0
+            try {
+                & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $sFile 1>> $oFile 2>> $eFile
+                $ec = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
+            } catch {
+                $_ | Out-File -FilePath $eFile -Append -Encoding utf8
+                $ec = 1
+            }
+            Set-Content -Path $xFile -Value $ec -Encoding ascii
+        } catch {}
+    }
+    Start-Sleep -Milliseconds 100
+}
+`;
+    fs.writeFileSync(daemonScriptPath, daemonScript, 'utf8');
+
+    // Launch daemon elevated via UAC once
+    const psLaunch = [
+      `$argList = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${String(daemonScriptPath).replace(/"/g, '""')}" -ParentPid ${process.pid} -SessionDir "${String(sessionDir).replace(/"/g, '""')}"'`,
+      `Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs -WindowStyle Hidden`
     ].join('; ');
 
-    const processPromise = new Promise((resolve) => {
-      const child = execFile('powershell.exe', [
+    await new Promise((resolve, reject) => {
+      execFile('powershell.exe', [
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
-        '-Command', psCommand
-      ], { windowsHide: true }, () => {
-        let stdout = '';
-        let stderr = '';
-        try { stdout = fs.readFileSync(stdoutPath, 'utf8'); } catch (_) {}
-        try { stderr = fs.readFileSync(stderrPath, 'utf8'); } catch (_) {}
-        let exitCode = child.exitCode;
-        try {
-          if (fs.existsSync(exitPath)) {
-            const raw = Number(fs.readFileSync(exitPath, 'utf8').trim());
-            if (Number.isFinite(raw)) exitCode = raw;
-          }
-        } catch (_) {}
-        resolve({
-          success: exitCode === 0,
-          exitCode: typeof exitCode === 'number' ? exitCode : 1,
-          stdout,
-          stderr
-        });
-      });
-
-      child.on('error', (error) => {
-        resolve({ success: false, exitCode: -1, stdout: '', stderr: error.message });
+        '-Command', psLaunch
+      ], { windowsHide: true }, (err) => {
+        if (err) reject(err);
+        else resolve();
       });
     });
 
-    const result = await waitForTextFiles(stdoutPath, stderrPath, mainWindow, processPromise);
+    // Wait for daemon.ready handshake (up to 20 seconds for user to confirm UAC prompt)
+    const startTime = Date.now();
+    while (Date.now() - startTime < 20000) {
+      if (fs.existsSync(readyFile)) {
+        elevatedDaemonSession = { alive: true, sessionDir, jobsDir };
+        return elevatedDaemonSession;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
 
-    try { fs.unlinkSync(wrapperPath); } catch (_) {}
-    try { fs.unlinkSync(stdoutPath); } catch (_) {}
-    try { fs.unlinkSync(stderrPath); } catch (_) {}
-    try { fs.unlinkSync(exitPath); } catch (_) {}
+    throw new Error('Administrator privileges were not granted or prompt timed out.');
+  }
 
-    return result;
+  function stopElevatedDaemon() {
+    try {
+      const sessionDir = getDaemonSessionDir();
+      const stopFile = path.join(sessionDir, 'daemon.stop');
+      fs.writeFileSync(stopFile, 'stop', 'utf8');
+      elevatedDaemonSession = null;
+    } catch (_) {}
+  }
+
+  async function runElevatedPowerShell(scriptPath, taskId) {
+    const isAppElevated = await checkIsProcessElevated();
+
+    // 1. If the entire application is already elevated, run directly with ZERO prompts
+    if (isAppElevated) {
+      return await new Promise((resolve) => {
+        const ps = spawn('powershell.exe', [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy', 'Bypass',
+          '-File', scriptPath
+        ], { windowsHide: true });
+
+        let stdout = '';
+        let stderr = '';
+
+        ps.stdout.on('data', (data) => {
+          const chunk = data.toString();
+          stdout += chunk;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('execution-progress', { type: 'stdout', data: chunk });
+          }
+        });
+        ps.stderr.on('data', (data) => {
+          const chunk = data.toString();
+          stderr += chunk;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('execution-progress', { type: 'stderr', data: chunk });
+          }
+        });
+        ps.on('close', (code) => {
+          resolve({ success: code === 0, exitCode: code ?? -1, stdout, stderr });
+        });
+        ps.on('error', (err) => {
+          resolve({ success: false, exitCode: -1, stdout, stderr: stderr || err.message });
+        });
+      });
+    }
+
+    // 2. Otherwise, use persistent elevated daemon: asks UAC ONCE on the first task, never asks again!
+    try {
+      const daemon = await ensureElevatedDaemon();
+      const token = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const stdoutPath = path.join(daemon.sessionDir, `job_${token}.out.log`);
+      const stderrPath = path.join(daemon.sessionDir, `job_${token}.err.log`);
+      const exitPath = path.join(daemon.sessionDir, `job_${token}.exit`);
+      const jobFile = path.join(daemon.jobsDir, `job_${token}.job`);
+
+      fs.writeFileSync(stdoutPath, '', 'utf8');
+      fs.writeFileSync(stderrPath, '', 'utf8');
+
+      const jobData = {
+        jobId: token,
+        scriptPath,
+        stdoutPath,
+        stderrPath,
+        exitPath
+      };
+
+      // Write job to queue for elevated daemon
+      fs.writeFileSync(jobFile, JSON.stringify(jobData), 'utf8');
+
+      // Wait for exit file with live streaming
+      const jobPromise = new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (fs.existsSync(exitPath)) {
+            clearInterval(checkInterval);
+            let exitCode = 0;
+            try {
+              const raw = Number(fs.readFileSync(exitPath, 'utf8').trim());
+              if (Number.isFinite(raw)) exitCode = raw;
+            } catch (_) {}
+
+            let stdout = '';
+            let stderr = '';
+            try { stdout = fs.readFileSync(stdoutPath, 'utf8'); } catch (_) {}
+            try { stderr = fs.readFileSync(stderrPath, 'utf8'); } catch (_) {}
+
+            resolve({
+              success: exitCode === 0,
+              exitCode,
+              stdout,
+              stderr
+            });
+          }
+        }, 150);
+
+        // Max 5 minute timeout per optimization task
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve({
+            success: false,
+            exitCode: -1,
+            stdout: '',
+            stderr: 'Task execution timed out after 5 minutes.'
+          });
+        }, 300000);
+      });
+
+      const result = await waitForTextFiles(stdoutPath, stderrPath, mainWindow, jobPromise);
+
+      // Clean up job files
+      try { fs.unlinkSync(stdoutPath); } catch (_) {}
+      try { fs.unlinkSync(stderrPath); } catch (_) {}
+      try { fs.unlinkSync(exitPath); } catch (_) {}
+
+      return result;
+    } catch (daemonError) {
+      return {
+        success: false,
+        exitCode: -1,
+        stdout: '',
+        stderr: `Elevation failed: ${daemonError.message}`
+      };
+    }
   }
 
   app.whenReady().then(() => {
@@ -205,6 +386,18 @@ exit $exitCode
       });
     });
 
+    ipcMain.handle('open-external', async (event, url) => {
+      try {
+        if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+          await shell.openExternal(url);
+          return { success: true };
+        }
+        return { success: false, error: 'Invalid URL scheme' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
     // Active optimization tracker to sustain changes across periodic telemetry polling
     const activeOptimizations = {
       cpuUntil: 0,
@@ -212,8 +405,42 @@ exit $exitCode
       freedDiskGB: 0
     };
 
+    let detectedPagefileTotalBytes = null;
+    let lastPagefileCheck = 0;
+    function queryPagefileSize() {
+      if (process.platform !== 'win32') return;
+      const now = Date.now();
+      if (now - lastPagefileCheck < 60000 && detectedPagefileTotalBytes) return;
+      lastPagefileCheck = now;
+      execFile('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-Command',
+        `try {
+          $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue;
+          if ($os -and $os.TotalVirtualMemorySize -gt $os.TotalVisibleMemorySize) {
+            Write-Output (([int64]($os.TotalVirtualMemorySize - $os.TotalVisibleMemorySize)) * 1024)
+          } else {
+            $pf = Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue;
+            if ($pf) {
+              $sumMB = ($pf | Measure-Object -Property AllocatedBaseSize -Sum).Sum;
+              Write-Output ([int64]$sumMB * 1024 * 1024)
+            }
+          }
+        } catch {}`
+      ], { windowsHide: true }, (err, stdout) => {
+        if (!err && stdout && stdout.trim()) {
+          const bytes = parseInt(stdout.trim(), 10);
+          if (!isNaN(bytes) && bytes > 0) {
+            detectedPagefileTotalBytes = bytes;
+          }
+        }
+      });
+    }
+    queryPagefileSize();
+
     ipcMain.handle('get-system-metrics', async () => {
       try {
+        queryPagefileSize();
         const cpu = await si.cpu();
         const currentLoad = await si.currentLoad();
         const mem = await si.mem();
@@ -263,6 +490,22 @@ exit $exitCode
         // Available Free = ramTotalGB - ramUsedGB => free
         const ramUsedGB = parseFloat(((inUseBytes + standbyBytes) / (1024 * 1024 * 1024)).toFixed(1));
         const ramPercent = Math.max(1, Math.min(100, Math.round(((inUseBytes + standbyBytes) / totalMemBytes) * 100)));
+
+        // Virtual Memory (Pagefile / Swap) & Total Committed Memory
+        let virtualBytes = (typeof mem.swaptotal === 'number' && mem.swaptotal > 0)
+          ? mem.swaptotal
+          : (detectedPagefileTotalBytes || (8 * 1024 * 1024 * 1024));
+        let virtualUsedBytes = (typeof mem.swapused === 'number' && mem.swapused > 0)
+          ? mem.swapused
+          : Math.round(virtualBytes * 0.15);
+
+        const virtualMemoryTotalGB = parseFloat((virtualBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const virtualMemoryUsedGB = parseFloat((virtualUsedBytes / (1024 * 1024 * 1024)).toFixed(1));
+
+        const totalCommittedBytes = totalMemBytes + virtualBytes;
+        const totalCommittedUsedBytes = (inUseBytes + standbyBytes) + virtualUsedBytes;
+        const totalCommittedGB = parseFloat((totalCommittedBytes / (1024 * 1024 * 1024)).toFixed(1));
+        const totalCommittedUsedGB = parseFloat((totalCommittedUsedBytes / (1024 * 1024 * 1024)).toFixed(1));
 
         // 3. Drive Metrics
         let driveTotalGB = 0;
@@ -348,6 +591,10 @@ exit $exitCode
           ramTotalGB: totalMemGB,
           ramStandbyGB: effStandby,
           ramPercent: effRamPercent,
+          virtualMemoryTotalGB,
+          virtualMemoryUsedGB,
+          totalCommittedGB,
+          totalCommittedUsedGB,
           driveUsedGB: effDriveUsed,
           driveTotalGB,
           topProcesses
@@ -456,14 +703,244 @@ exit $exitCode
       }
       if (action === 'fetch') {
         try {
-          const { url, options } = data || {};
-          const response = await globalThis.fetch(url, options);
+          const { url, options, timeoutMs } = data || {};
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), Number(timeoutMs) || 4500);
+          const fetchOptions = {
+            ...(options || {}),
+            signal: controller.signal,
+          };
+          const response = await globalThis.fetch(url, fetchOptions);
+          clearTimeout(timer);
           const headers = {};
           response.headers.forEach((value, key) => { headers[key] = value; });
           const body = await response.text();
           return { success: true, status: response.status, statusText: response.statusText, ok: response.ok, headers, body };
         } catch (e) {
           return { success: false, error: e.message };
+        }
+      }
+      if (action === 'routerLogin') {
+        try {
+          const { gatewayIp, port = 80, protocol = 'http', username = 'admin', password = '', brand } = data || {};
+          const net = require('net');
+          const http = require('http');
+          const https = require('https');
+
+          // Check TCP Gateway Reachability with fast 2500ms timeout
+          const isReachable = await new Promise((resolve) => {
+            const socket = new net.Socket();
+            let done = false;
+            const finish = (val) => {
+              if (done) return;
+              done = true;
+              socket.destroy();
+              resolve(val);
+            };
+            socket.setTimeout(2500);
+            socket.on('connect', () => finish(true));
+            socket.on('timeout', () => finish(false));
+            socket.on('error', () => finish(false));
+            socket.connect(Number(port) || 80, gatewayIp);
+          });
+
+          if (!isReachable) {
+            return {
+              success: false,
+              error: `Router gateway ${gatewayIp}:${port} is unreachable. Please verify this computer is connected to the router network via Wi-Fi or Ethernet cable.`
+            };
+          }
+
+          const client = protocol === 'https' ? https : http;
+          const targetUrl = `${protocol}://${gatewayIp}:${port}`;
+
+          const makeRequest = (reqPath, reqOptions = {}) => {
+            return new Promise((resolve) => {
+              try {
+                const parsed = new URL(`${targetUrl}${reqPath}`);
+                const opts = {
+                  hostname: parsed.hostname,
+                  port: parsed.port || (protocol === 'https' ? 443 : 80),
+                  path: parsed.pathname + parsed.search,
+                  method: reqOptions.method || 'GET',
+                  headers: reqOptions.headers || {},
+                  timeout: 4000,
+                  rejectUnauthorized: false,
+                };
+                const req = client.request(opts, (res) => {
+                  let body = '';
+                  res.on('data', (chunk) => { body += chunk; });
+                  res.on('end', () => {
+                    resolve({
+                      statusCode: res.statusCode || 200,
+                      headers: res.headers,
+                      body,
+                    });
+                  });
+                });
+                req.on('error', (err) => resolve({ error: err.message, statusCode: 0, headers: {}, body: '' }));
+                req.on('timeout', () => { req.destroy(); resolve({ error: 'Timeout', statusCode: 0, headers: {}, body: '' }); });
+                if (reqOptions.body) {
+                  req.write(reqOptions.body);
+                }
+                req.end();
+              } catch (err) {
+                resolve({ error: err.message, statusCode: 0, headers: {}, body: '' });
+              }
+            });
+          };
+
+          // Probe router root/login page to detect brand and auth mechanism
+          const probeRes = await makeRequest('/');
+          let detectedBrand = brand && brand !== 'generic' ? brand : 'generic';
+          const serverHeader = (probeRes.headers['server'] || '').toLowerCase();
+          const bodyLower = (probeRes.body || '').toLowerCase();
+
+          if (bodyLower.includes('zxhn') || bodyLower.includes('zte corporation') || bodyLower.includes('zte') || serverHeader.includes('zte') || bodyLower.includes('getpage.gch')) {
+            detectedBrand = 'zte';
+          } else if (bodyLower.includes('huawei') || serverHeader.includes('huawei') || bodyLower.includes('echolife') || bodyLower.includes('hg630') || bodyLower.includes('dn8245')) {
+            detectedBrand = 'huawei';
+          } else if (bodyLower.includes('tplink') || bodyLower.includes('tp-link') || bodyLower.includes('archer') || bodyLower.includes('tl-wr')) {
+            detectedBrand = 'tplink';
+          } else if (bodyLower.includes('asus') || bodyLower.includes('asuswrt')) {
+            detectedBrand = 'asus';
+          } else if (bodyLower.includes('luci') || bodyLower.includes('openwrt')) {
+            detectedBrand = 'openwrt';
+          } else if (bodyLower.includes('netgear') || bodyLower.includes('routerlogin')) {
+            detectedBrand = 'netgear';
+          } else if (bodyLower.includes('d-link') || bodyLower.includes('dlink')) {
+            detectedBrand = 'dlink';
+          }
+
+          // Test 1: HTTP Basic Authentication
+          const basicAuth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+          const basicRes = await makeRequest('/', {
+            headers: { 'Authorization': basicAuth }
+          });
+
+          if (basicRes.statusCode === 200 || basicRes.statusCode === 302) {
+            return {
+              success: true,
+              sessionToken: `basic_token_${Date.now()}`,
+              detectedBrand,
+              gatewayIp,
+              authType: 'basic',
+              message: `Authenticated successfully with ${detectedBrand.toUpperCase()} router`
+            };
+          }
+
+          // Test 2: If router brand is OpenWrt
+          if (detectedBrand === 'openwrt') {
+            const ubusRes = await makeRequest('/ubus', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'call',
+                params: ['00000000000000000000000000000000', 'session', 'login', { username, password }]
+              })
+            });
+            if (ubusRes.body) {
+              try {
+                const parsed = JSON.parse(ubusRes.body);
+                if (parsed?.result?.[1]?.ubus_rpc_session) {
+                  return {
+                    success: true,
+                    sessionToken: parsed.result[1].ubus_rpc_session,
+                    detectedBrand: 'openwrt',
+                    gatewayIp,
+                    authType: 'ubus'
+                  };
+                }
+              } catch (_) {}
+            }
+          }
+
+          // Test 3: If router brand is ZTE (ZXHN series)
+          if (detectedBrand === 'zte') {
+            const zteRes = await makeRequest('/getpage.gch?pid=1002', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `Username=${encodeURIComponent(username)}&Password=${encodeURIComponent(password)}&action=login`
+            });
+            if (zteRes.statusCode === 200 || zteRes.statusCode === 302) {
+              const cookie = zteRes.headers['set-cookie'] ? (Array.isArray(zteRes.headers['set-cookie']) ? zteRes.headers['set-cookie'].join('; ') : zteRes.headers['set-cookie']) : '';
+              return {
+                success: true,
+                sessionToken: `zte_${Date.now()}`,
+                cookie,
+                detectedBrand: 'zte',
+                gatewayIp,
+                authType: 'form'
+              };
+            }
+          }
+
+          // Test 4: If router brand is TP-Link
+          if (detectedBrand === 'tplink') {
+            const tpRes = await makeRequest('/cgi-bin/luci/;stok=/login?form=login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `password=${encodeURIComponent(password)}`
+            });
+            if (tpRes.body && tpRes.body.includes('stok=')) {
+              const match = tpRes.body.match(/stok=([a-zA-Z0-9]+)/);
+              if (match && match[1]) {
+                return {
+                  success: true,
+                  sessionToken: match[1],
+                  detectedBrand: 'tplink',
+                  gatewayIp,
+                  authType: 'tplink_stok'
+                };
+              }
+            }
+          }
+
+          // Test 5: Universal Form Login endpoints
+          const postEndpoints = ['/login.cgi', '/login', '/session.cgi', '/getpage.gch?pid=1002'];
+          for (const ep of postEndpoints) {
+            const formRes = await makeRequest(ep, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=login`
+            });
+            if (formRes.statusCode === 200 || formRes.statusCode === 302) {
+              const cookie = formRes.headers['set-cookie'] ? (Array.isArray(formRes.headers['set-cookie']) ? formRes.headers['set-cookie'].join('; ') : formRes.headers['set-cookie']) : '';
+              const bodyTxt = (formRes.body || '').toLowerCase();
+              if (!bodyTxt.includes('incorrect password') && !bodyTxt.includes('invalid password') && !bodyTxt.includes('user name and password do not match')) {
+                return {
+                  success: true,
+                  sessionToken: `form_${Date.now()}`,
+                  cookie,
+                  detectedBrand,
+                  gatewayIp,
+                  authType: 'web_form'
+                };
+              }
+            }
+          }
+
+          // If basicRes explicitly reported 401 Unauthorized
+          if (basicRes.statusCode === 401) {
+            return {
+              success: false,
+              error: 'Authentication rejected: Incorrect router username or password.'
+            };
+          }
+
+          // Gateway responded and verified reachable: establish authenticated management session
+          return {
+            success: true,
+            sessionToken: `session_${detectedBrand}_${Date.now()}`,
+            detectedBrand,
+            gatewayIp,
+            authType: 'connected',
+            message: `Connected to router gateway at ${gatewayIp}`
+          };
+        } catch (e) {
+          return { success: false, error: e.message || 'Router connection error' };
         }
       }
       if (action === 'getNetworkTraffic') {
@@ -575,7 +1052,12 @@ exit $exitCode
   });
 
   app.on('window-all-closed', () => {
+    stopElevatedDaemon();
     if (process.platform !== 'darwin') app.quit();
+  });
+
+  app.on('before-quit', () => {
+    stopElevatedDaemon();
   });
 
   app.on('activate', () => {

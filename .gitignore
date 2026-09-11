@@ -3,6 +3,9 @@ build/
 dist/
 coverage/
 release/
+windows-webview2/bin/
+windows-webview2/obj/
+windows-webview2/dist/
 .DS_Store
 *.log
 .env*
