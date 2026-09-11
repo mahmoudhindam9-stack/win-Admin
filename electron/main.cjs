@@ -503,6 +503,11 @@ while ($true) {
         }
         lastCpuTimes = { idle, total };
 
+        const currentLoad = await si.currentLoad();
+        if (currentLoad && typeof currentLoad.currentLoad === 'number') {
+           cpuUsagePercent = Math.round(currentLoad.currentLoad);
+        }
+
         const mem = await si.mem();
 
         const now = Date.now();
@@ -556,15 +561,15 @@ while ($true) {
         const cpuProcesses = cachedCpuProcessesCount;
 
         // 2. Precise RAM Metrics matching Windows Task Manager
-        const totalMemBytes = os.totalmem();
-        const availMemBytes = os.freemem(); // In Node Windows, freemem actually reports the system's "Available" memory
+        const totalMemBytes = mem.total || os.totalmem();
+        const availMemBytes = mem.available || os.freemem(); 
         const totalMemGB = parseFloat((totalMemBytes / (1024 * 1024 * 1024)).toFixed(1));
 
         // Task manager "In Use" = Total Physical - Available Physical
         const inUseBytes = Math.max(0, totalMemBytes - availMemBytes);
 
-        // Standby memory isn't natively exposed, assume roughly ~30% of available memory as cache
-        const standbyBytes = Math.round(availMemBytes * 0.30);
+        // Standby memory
+        const standbyBytes = typeof mem.buffcache === 'number' && mem.buffcache > 0 ? mem.buffcache : Math.round(availMemBytes * 0.30);
         const ramStandbyGB = parseFloat((standbyBytes / (1024 * 1024 * 1024)).toFixed(1));
 
         const ramUsedGB = parseFloat((inUseBytes / (1024 * 1024 * 1024)).toFixed(1));
@@ -623,20 +628,8 @@ while ($true) {
           driveUsedGB = 283.0;
         }
 
-        // 4. Real Top RAM Consumer Processes (sorted descending, non-idle)
-        const nonIdle = procList.filter(p => {
-          if (!p || !p.name) return false;
-          const n = p.name.toLowerCase();
-          return n !== 'system idle process' && n !== 'idle' && p.pid !== 0;
-        });
-        nonIdle.sort((a, b) => (b.memRss || 0) - (a.memRss || 0));
-
-        let topProcesses = (nonIdle.length > 0 ? nonIdle : procList).slice(0, 5).map(p => ({
-          name: String(p.name).replace(/\.exe$/i, ''),
-          pid: p.pid,
-          cpuPercent: parseFloat((p.cpu || 0).toFixed(1)),
-          memMB: Math.round((p.memRss || 0) / 1024)
-        }));
+        // 4. Real Top RAM Consumer Processes
+        let topProcesses = cachedTopProcesses;
 
         if (topProcesses.length === 0 || topProcesses[0]?.memMB === 0) {
           topProcesses = [
