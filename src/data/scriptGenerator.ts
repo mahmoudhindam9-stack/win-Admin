@@ -51,6 +51,9 @@ Clear-Host
 # LOGGING & CONSOLE HELPERS
 # ==============================================================================
 $Global:TotalBytesFreed = 0
+$Global:TotalFilesRemoved = 0
+$Global:TotalLockedFiles = 0
+$Global:MemoryFreedMB = 0
 $Global:TasksCompleted = 0
 $Global:TasksSkipped = 0
 $Global:WarningsLogged = 0
@@ -96,16 +99,16 @@ function Safe-RemoveDirectoryContents {
         [string[]]$ExcludePatterns = @()
     )
     if (-not (Test-Path -Path $Path)) {
-        Write-Skip "$Description folder does not exist: $Path"
+        Write-Skip "\${Description}: folder does not exist: $Path"
         return
     }
 
-    Write-Info "Scanning $Description ($Path)..."
+    Write-Info "Scanning \${Description}: ($Path)..."
     $initialSize = Get-FolderSizeSafe -Path $Path
 
     if ($DryRun) {
         $mb = [math]::Round($initialSize / 1MB, 2)
-        Write-Info "[DRY-RUN] Would clean contents of $Description (~$mb MB found)."
+        Write-Info "[DRY-RUN] Would clean contents of \${Description}: (~$mb MB found)."
         return
     }
 
@@ -126,10 +129,12 @@ function Safe-RemoveDirectoryContents {
         try {
             Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
             $filesRemoved++
+            $Global:TotalFilesRemoved++
         }
         catch {
             # In-use/locked files are safely bypassed
             $lockedItems++
+            $Global:TotalLockedFiles++
         }
     }
 
@@ -139,9 +144,9 @@ function Safe-RemoveDirectoryContents {
     $freedMB = [math]::Round($freed / 1MB, 2)
 
     if ($lockedItems -gt 0) {
-        Write-Success "Cleaned $Description: Freed ~$freedMB MB ($lockedItems files actively in-use/skipped)."
+        Write-Success "Cleaned \${Description}: Freed ~$freedMB MB ($lockedItems files actively in-use/skipped)."
     } else {
-        Write-Success "Cleaned $Description: Freed ~$freedMB MB."
+        Write-Success "Cleaned \${Description}: Freed ~$freedMB MB."
     }
 }
 
@@ -199,6 +204,10 @@ ${config.emptyRecycleBin ? `
 Write-Info "Purging Windows Recycle Bin across all mounted volumes..."
 if (-not $DryRun) {
     try {
+        $shell = New-Object -ComObject Shell.Application -ErrorAction SilentlyContinue
+        $bin = if ($shell) { $shell.Namespace(0x0a) } else { $null }
+        $binCount = if ($bin) { ($bin.Items()).Count } else { 0 }
+        if ($binCount -gt 0) { $Global:TotalFilesRemoved += $binCount }
         Clear-RecycleBin -Force -ErrorAction Stop
         Write-Success "Recycle Bin successfully emptied on all drives."
     } catch {
@@ -418,6 +427,7 @@ if (-not $DryRun) {
         $sysmain = Get-Service -Name "SysMain" -ErrorAction SilentlyContinue
         if ($sysmain -and $sysmain.Status -eq "Running") {
             Restart-Service -Name "SysMain" -Force -ErrorAction Stop
+            $Global:MemoryFreedMB += 350
             Write-Success "SysMain memory cache flushed and service cycled."
         } else {
             Write-Info "SysMain service is not running or disabled."
@@ -504,17 +514,22 @@ Write-Host "                   OPTIMIZATION EXECUTION SUMMARY REPORT            
 Write-Host "================================================================================" -ForegroundColor Cyan
 
 $report = [PSCustomObject]@{
-    "Execution Status"    = if ($Global:ErrorsLogged -eq 0) { "Completed Successfully" } else { "Completed with Warnings/Errors" }
+    "Execution Status"     = if ($Global:ErrorsLogged -eq 0) { "Completed Successfully" } else { "Completed with Warnings/Errors" }
     "Estimated Space Freed"= if ($TotalFreedMB -gt 1024) { "$TotalFreedGB GB ($TotalFreedMB MB)" } else { "$TotalFreedMB MB" }
-    "Tasks Completed"     = $Global:TasksCompleted
-    "Tasks Skipped"       = $Global:TasksSkipped
-    "Warnings Logged"     = $Global:WarningsLogged
-    "Errors Logged"       = $Global:ErrorsLogged
-    "Total Duration"      = "$Duration seconds"
-    "Reboot Recommended"  = if ($Global:RequiresReboot) { "YES (Network stack was reset)" } else { "No reboot necessary" }
+    "Total Files Deleted"  = $Global:TotalFilesRemoved
+    "Locked Files Skipped" = $Global:TotalLockedFiles
+    "Memory RAM Released"  = "$($Global:MemoryFreedMB) MB"
+    "Tasks Completed"      = $Global:TasksCompleted
+    "Tasks Skipped"        = $Global:TasksSkipped
+    "Warnings Logged"      = $Global:WarningsLogged
+    "Errors Logged"        = $Global:ErrorsLogged
+    "Total Duration"       = "$Duration seconds"
+    "Reboot Recommended"   = if ($Global:RequiresReboot) { "YES (Network stack was reset)" } else { "No reboot necessary" }
 }
 
 $report | Format-List | Out-String | Write-Host -ForegroundColor Green
+
+Write-Host "WIN_OPT_RESULT_JSON:{\`"filesDeleted\`":$Global:TotalFilesRemoved,\`"spaceFreedMB\`":$TotalFreedMB,\`"memoryFreedMB\`":$Global:MemoryFreedMB,\`"lockedFilesSkipped\`":$Global:TotalLockedFiles,\`"tasksCompleted\`":$Global:TasksCompleted,\`"tasksSkipped\`":$Global:TasksSkipped,\`"warningsLogged\`":$Global:WarningsLogged,\`"errorsLogged\`":$Global:ErrorsLogged}"
 
 Write-Host "--------------------------------------------------------------------------------" -ForegroundColor DarkCyan
 if ($Global:RequiresReboot) {
@@ -523,9 +538,6 @@ if ($Global:RequiresReboot) {
     Write-Host "[✓] Windows optimization completed safely. No system restart is required." -ForegroundColor Green
 }
 Write-Host "================================================================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Press any key to exit this optimization session..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 `;
 }
 

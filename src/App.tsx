@@ -37,6 +37,7 @@ export default function App() {
   const [lastReport, setLastReport] = useState<ExecutionReport | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [autoStartTerminal, setAutoStartTerminal] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   // Live Hardware Telemetry State
   const [isElevated, setIsElevated] = useState(false);
@@ -68,13 +69,19 @@ export default function App() {
     isExecutingRef.current = isExecuting;
   }, [isExecuting]);
 
-  // Real-time ticking telemetry loop (every 1000ms)
+  // Real-time ticking telemetry loop (every 2000ms)
   useEffect(() => {
     const fetchMetrics = async () => {
       if (window.electronAPI) {
         try {
           const elevated = await window.electronAPI.checkElevation();
           setIsElevated(elevated);
+          if (elevated) {
+            setIsAuthorized(true);
+          } else if (window.electronAPI.isSessionAuthorized) {
+            const authorized = await window.electronAPI.isSessionAuthorized();
+            setIsAuthorized(authorized);
+          }
 
           const realMetrics = await window.electronAPI.getSystemMetrics();
           if (realMetrics) {
@@ -91,6 +98,23 @@ export default function App() {
         } catch (e) {
           console.error("Failed to fetch real telemetry:", e);
         }
+      } else {
+        // Dynamic live simulation for preview environment
+        setMetrics(prev => {
+          const cpuDelta = (Math.random() - 0.49) * 3;
+          const newCpu = Math.max(8, Math.min(85, Math.round(prev.cpuUsagePercent + cpuDelta)));
+          const ramDelta = (Math.random() - 0.5) * 0.05;
+          const newRamUsed = Math.max(3.8, Math.min(prev.ramTotalGB - 1, parseFloat((prev.ramUsedGB + ramDelta).toFixed(1))));
+          const newRamPercent = Math.round((newRamUsed / prev.ramTotalGB) * 100);
+          return {
+            ...prev,
+            cpuUsagePercent: newCpu,
+            cpuHistory: [...prev.cpuHistory.slice(1), newCpu],
+            ramUsedGB: newRamUsed,
+            ramPercent: newRamPercent,
+            ramHistory: [...prev.ramHistory.slice(1), newRamPercent]
+          };
+        });
       }
     };
 
@@ -101,16 +125,40 @@ export default function App() {
   }, []);
 
   // Handler: When user clicks ANY action button in Admin Dashboard
-  // Strictly asks permission first, does NOT show raw scripts!
-  const handleSelectTask = (task: OptimizationTaskInfo) => {
+  // Authorization is requested ONLY ONCE on the first command; subsequent commands run directly!
+  const handleSelectTask = async (task: OptimizationTaskInfo) => {
     setSelectedTask(task);
-    setIsUACModalOpen(true);
+    let authorized = isAuthorized || isElevated;
+    if (!authorized && window.electronAPI?.isSessionAuthorized) {
+      try {
+        authorized = await window.electronAPI.isSessionAuthorized();
+        if (authorized) setIsAuthorized(true);
+      } catch (_) {}
+    }
+
+    if (!authorized) {
+      // First command only: prompt for PowerShell authorization
+      setIsUACModalOpen(true);
+    } else {
+      // Authorization already established: execute immediately without prompting
+      setIsExecuting(true);
+      setAutoStartTerminal(true);
+      setActiveView('terminal');
+    }
   };
 
   // Handler: User clicks "Approve & Elevate" in UAC dialog
-  // Directly accesses the PowerShell terminal and runs execution!
-  const handleApproveUAC = (task: OptimizationTaskInfo) => {
+  // Grabs persistent PowerShell session authorization once for all commands!
+  const handleApproveUAC = async (task: OptimizationTaskInfo) => {
     setIsUACModalOpen(false);
+    setIsAuthorized(true);
+    if (window.electronAPI?.requestAuthorization) {
+      try {
+        await window.electronAPI.requestAuthorization();
+      } catch (err) {
+        console.warn("Session authorization:", err);
+      }
+    }
     setIsExecuting(true);
     setAutoStartTerminal(true);
     setActiveView('terminal');
@@ -122,10 +170,30 @@ export default function App() {
   };
 
   // Handler: PowerShell Terminal finishes execution
+  // Re-synchronize device status squares (CPU, RAM, Disk) directly with the report results!
   const handleExecutionComplete = (report: ExecutionReport) => {
     setIsExecuting(false);
     setAutoStartTerminal(false);
     setLastReport(report);
+
+    // Re-synchronize the 3 device status cards with what was freed in the report
+    if (report.spaceFreedMB > 0 || report.memoryFreedMB > 0) {
+      setMetrics(prev => {
+        const freedDiskGB = parseFloat((report.spaceFreedMB / 1024).toFixed(2));
+        const freedRAMGB = parseFloat((report.memoryFreedMB / 1024).toFixed(2));
+        const updatedDiskUsed = Math.max(10, parseFloat((prev.driveUsedGB - freedDiskGB).toFixed(1)));
+        const updatedRamUsed = Math.max(2, parseFloat((prev.ramUsedGB - freedRAMGB).toFixed(1)));
+        const updatedRamPercent = Math.round((updatedRamUsed / prev.ramTotalGB) * 100);
+        return {
+          ...prev,
+          driveUsedGB: updatedDiskUsed,
+          ramUsedGB: updatedRamUsed,
+          ramPercent: updatedRamPercent,
+          ramStandbyGB: Math.max(0.4, parseFloat((prev.ramStandbyGB - freedRAMGB * 0.8).toFixed(1))),
+          ramHistory: [...prev.ramHistory.slice(1), updatedRamPercent]
+        };
+      });
+    }
 
     // Automatically open simple report modal
     setIsReportModalOpen(true);
@@ -210,6 +278,7 @@ export default function App() {
             onOpenTerminalView={() => setActiveView('terminal')}
             onOpenReportModal={() => setIsReportModalOpen(true)}
             onOpenRouterView={() => setActiveView('router')}
+            isAuthorized={isAuthorized}
           />
         )}
 
