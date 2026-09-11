@@ -23,7 +23,7 @@
     "productName": "Windows Performance Optimizer Suite",
     "directories": { "output": "release" },
     "files": ["dist/**/*", "electron/**/*"],
-    "win": { "target": "nsis", "icon": "buildResources/icon.ico" },
+    "win": { "target": "nsis", "icon": "buildResources/icon.ico", "artifactName": "Windows-Performance-Optimizer-Suite-Setup-${version}.${ext}" },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
