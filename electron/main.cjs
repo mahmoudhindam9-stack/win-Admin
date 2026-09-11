@@ -6,7 +6,7 @@ const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 
 // Low-memory Chromium switches (drastically cuts Electron RAM usage from ~260MB down to minimal footprint)
-app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication');
+app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,HardwareMediaKeyHandling,MediaSessionService');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
@@ -22,8 +22,12 @@ app.commandLine.appendSwitch('disable-translate');
 app.commandLine.appendSwitch('disable-speech-api');
 app.commandLine.appendSwitch('disable-speech-synthesis-api');
 app.commandLine.appendSwitch('disable-print-preview');
+app.commandLine.appendSwitch('disable-site-isolation-trials');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('renderer-process-limit', '1');
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=96 --optimize-for-size --expose-gc');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=48 --optimize-for-size --expose-gc');
 
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -510,7 +514,7 @@ while ($true) {
 
         // Sample processes every 4 ticks to prevent V8 heap inflation
         processPollCounter++;
-        if (cachedTopProcesses.length === 0 || processPollCounter % 4 === 0) {
+        if (cachedTopProcesses.length === 0 || processPollCounter % 12 === 0) {
           try {
             const processes = await si.processes();
             const procList = Array.isArray(processes?.list) ? processes.list : [];
@@ -551,20 +555,17 @@ while ($true) {
         const cpuClockSpeedGhz = parseFloat(Math.max(2.40, Math.min(5.20, speedGhz + loadBoost + (Math.random() - 0.5) * 0.04)).toFixed(2));
         const cpuProcesses = cachedCpuProcessesCount;
 
-        // 2. Precise RAM Metrics
-        const totalMemBytes = mem.total || os.totalmem();
-        const availMemBytes = mem.available || mem.free || os.freemem();
+        // 2. Precise RAM Metrics matching Windows Task Manager
+        const totalMemBytes = os.totalmem();
+        const availMemBytes = os.freemem(); // In Node Windows, freemem actually reports the system's "Available" memory
         const totalMemGB = parseFloat((totalMemBytes / (1024 * 1024 * 1024)).toFixed(1));
 
-        // Windows systeminformation buffcache is 0; derive live standby cache from available memory
-        let standbyBytes = typeof mem.buffcache === 'number' && mem.buffcache > 0
-          ? mem.buffcache
-          : Math.round(availMemBytes * 0.34);
-        const ramStandbyGB = parseFloat((standbyBytes / (1024 * 1024 * 1024)).toFixed(1));
-
-        // Free memory (unallocated pages)
-        const freeBytes = Math.max(0, availMemBytes - standbyBytes);
+        // Task manager "In Use" = Total Physical - Available Physical
         const inUseBytes = Math.max(0, totalMemBytes - availMemBytes);
+
+        // Standby memory isn't natively exposed, assume roughly ~30% of available memory as cache
+        const standbyBytes = Math.round(availMemBytes * 0.30);
+        const ramStandbyGB = parseFloat((standbyBytes / (1024 * 1024 * 1024)).toFixed(1));
 
         const ramUsedGB = parseFloat((inUseBytes / (1024 * 1024 * 1024)).toFixed(1));
         const ramPercent = Math.max(1, Math.min(100, Math.round((inUseBytes / totalMemBytes) * 100)));
