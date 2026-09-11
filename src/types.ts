@@ -111,6 +111,7 @@ declare global {
       runOptimizationTask: (taskId: OptimizationTaskId, config: ScriptConfig, elevate: boolean) => Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string; error?: string }>;
       onExecutionProgress: (callback: (data: { type: 'stdout' | 'stderr'; data: string }) => void) => () => void;
       routerApi: (action: string, data?: any) => Promise<any>;
+      wifiApi?: (action: string, data?: any) => Promise<any>;
       checkForUpdate: () => Promise<{ success: boolean; reason?: string; error?: string; updateInfo?: { version?: string } | null }>;
       downloadUpdate: () => Promise<{ success: boolean; error?: string }>;
       installUpdate: () => Promise<{ success: boolean; reason?: string; error?: string }>;

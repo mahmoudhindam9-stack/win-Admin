@@ -8,6 +8,7 @@ import {
   ProbeResult,
   ManagementProtocol,
   AuthMethod,
+  DiscoveredClientDevice,
 } from '../types';
 
 export class OpenWrtAdapter extends BaseRouterAdapter {
@@ -187,6 +188,54 @@ export class OpenWrtAdapter extends BaseRouterAdapter {
     } catch (e: any) {
       return { success: false, error: `Network connection failed: ${e.message}` };
     }
+  }
+
+  async fetchConnectedDevices(
+    endpoint: string,
+    sessionToken?: string
+  ): Promise<{
+    success: boolean;
+    devices: DiscoveredClientDevice[];
+    error?: string;
+    rawResponse?: any;
+  }> {
+    if (sessionToken) {
+      try {
+        // Query OpenWrt LuCI RPC for live DHCP leases
+        const resp = await this.safeFetchWithTimeout(`${endpoint}/ubus`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 15,
+            method: 'call',
+            params: [sessionToken, 'luci-rpc', 'getDHCPLeases', {}],
+          }),
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          const leases = data?.result?.[1]?.dhcpleases || data?.result?.[1]?.leases;
+          if (Array.isArray(leases) && leases.length > 0) {
+            const devices: DiscoveredClientDevice[] = leases.map((l: any) => ({
+              ip: l.ipaddr || l.ip,
+              mac: (l.macaddr || l.mac || '').toUpperCase(),
+              hostname: l.hostname || `Host-${(l.ipaddr || l.ip || '').split('.').pop()}`,
+              connectionType: '5.0GHz',
+              isOnline: true,
+              usedDataGB: 0,
+              bandwidthRateKBps: 0,
+            }));
+            return { success: true, devices, rawResponse: data };
+          }
+        }
+      } catch (e) {
+        console.warn('OpenWrt live DHCP leases fetch notice:', e);
+      }
+    }
+
+    // Fall back to system ARP table discovery
+    return super.fetchConnectedDevices(endpoint, sessionToken);
   }
 
   async applyWirelessConfig(

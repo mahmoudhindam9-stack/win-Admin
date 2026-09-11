@@ -10,6 +10,7 @@ import {
   ManagementProtocol,
   AuthMethod,
   VerifiedField,
+  DiscoveredClientDevice,
 } from '../types';
 
 export abstract class BaseRouterAdapter implements RouterAdapter {
@@ -206,6 +207,69 @@ export abstract class BaseRouterAdapter implements RouterAdapter {
         verifiedFields,
       };
     }
+  }
+
+  /**
+   * Default implementation to fetch connected devices from the router or system ARP network table
+   */
+  async fetchConnectedDevices(
+    _endpoint: string,
+    _sessionToken?: string
+  ): Promise<{
+    success: boolean;
+    devices: DiscoveredClientDevice[];
+    error?: string;
+    rawResponse?: any;
+  }> {
+    // 1. In Electron desktop runtime, query live Windows/OS ARP neighbor cache
+    if ((window as any).electronAPI?.routerApi) {
+      try {
+        const res = await (window as any).electronAPI.routerApi('getConnectedDevices');
+        if (res && res.success && Array.isArray(res.devices) && res.devices.length > 0) {
+          const devices: DiscoveredClientDevice[] = res.devices.map((d: any, idx: number) => ({
+            ip: d.ip,
+            mac: d.mac || '00:00:00:00:00:00',
+            hostname: d.hostname || `Host-${d.ip.split('.').pop()}`,
+            connectionType: (d.connectionType as any) || (idx === 0 ? 'Ethernet' : '5.0GHz'),
+            isOnline: true,
+            usedDataGB: 0,
+            bandwidthRateKBps: 0,
+          }));
+          return { success: true, devices, rawResponse: res };
+        }
+      } catch (err: any) {
+        console.warn('Electron getConnectedDevices fallback note:', err);
+      }
+    }
+
+    // 2. Query web preview backend endpoint /api/router/quota/devices
+    try {
+      const res = await fetch('/api/router/quota/devices')
+        .then((r) => r.json())
+        .catch(() => null);
+      if (res && res.success && Array.isArray(res.devices)) {
+        return {
+          success: true,
+          devices: res.devices.map((d: any) => ({
+            ip: d.ip,
+            mac: d.mac || '00:00:00:00:00:00',
+            hostname: d.hostname || `Host-${d.ip.split('.').pop()}`,
+            connectionType: d.connectionType || '5.0GHz',
+            isOnline: true,
+            usedDataGB: 0,
+            bandwidthRateKBps: 0,
+          })),
+          rawResponse: res,
+        };
+      }
+    } catch (e) {
+      console.warn('Network devices probe note:', e);
+    }
+
+    return {
+      success: true,
+      devices: [],
+    };
   }
 
   abstract generateDirectScript(

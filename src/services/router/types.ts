@@ -134,6 +134,18 @@ export interface ProbeResult {
   suggestedProtocol?: 'http' | 'https';
 }
 
+export interface DiscoveredClientDevice {
+  ip: string;
+  mac?: string;
+  hostname?: string;
+  connectionType?: 'Ethernet' | '5.0GHz' | '2.4GHz' | string;
+  isOnline?: boolean;
+  rxBytes?: number;
+  txBytes?: number;
+  usedDataGB?: number;
+  bandwidthRateKBps?: number;
+}
+
 export interface RouterAdapter {
   id: RouterBrand;
   name: string;
@@ -170,6 +182,16 @@ export interface RouterAdapter {
   ): Promise<{
     success: boolean;
     config?: RouterWirelessConfig;
+    error?: string;
+    rawResponse?: any;
+  }>;
+
+  fetchConnectedDevices?(
+    endpoint: string,
+    sessionToken?: string
+  ): Promise<{
+    success: boolean;
+    devices: DiscoveredClientDevice[];
     error?: string;
     rawResponse?: any;
   }>;

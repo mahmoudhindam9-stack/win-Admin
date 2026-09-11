@@ -24,6 +24,8 @@ import {
   AlertTriangle,
   RotateCcw,
   Sparkles,
+  Gauge,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   RouterBrand,
@@ -36,12 +38,24 @@ import {
 } from '../services/router/types';
 import { RouterAdapterRegistry } from '../services/router/registry';
 import { autoDetectRouterGateway, testGatewayPing } from '../services/router/detector';
+import { WifiNetworkScanner } from './WifiNetworkScanner';
+import { RouterQuotaManagement } from './RouterQuotaManagement';
+import { RouterQuotaManager } from '../services/router/quotaEngine';
+import { RouterParentalControl } from './RouterParentalControl';
 
 interface RouterManagementViewProps {}
 
 export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
   const registry = RouterAdapterRegistry.getInstance();
   const supportedBrands = registry.getSupportedBrands();
+
+  // Router Quota Management State
+  const [quotaDb, setQuotaDb] = useState(RouterQuotaManager.getInstance().getSnapshot());
+
+  useEffect(() => {
+    const unsub = RouterQuotaManager.getInstance().subscribe(setQuotaDb);
+    return () => unsub();
+  }, []);
 
   // Device & Connection State
   const [deviceInfo, setDeviceInfo] = useState<RouterDeviceInfo | null>(null);
@@ -109,7 +123,7 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [showScriptModal, setShowScriptModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'wifi' | 'guest' | 'security' | 'direct'>('wifi');
+  const [activeTab, setActiveTab] = useState<'wifi' | 'guest' | 'quota' | 'parental' | 'direct'>('wifi');
 
   // Initial gateway detection
   useEffect(() => {
@@ -223,10 +237,66 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
         setOriginalConfig(configRes.config);
       }
 
-      setSuccessMessage(`Successfully authenticated with ${deviceInfo.brandName} (${deviceInfo.managementProtocol})`);
+      // Immediately fetch real connected devices from router/network and wipe mock data
+      await fetchAndSyncRealDevices(endpoint, token, deviceInfo!.brand);
+
+      setSuccessMessage(`Successfully authenticated with ${deviceInfo.brandName} (${deviceInfo.managementProtocol}). Real network devices synchronized.`);
     } catch (err: any) {
       setConnectionStatus('error');
       setErrorMessage(`Authentication failed: ${err.message || String(err)}`);
+    }
+  };
+
+  const fetchAndSyncRealDevices = async (
+    targetEndpoint?: string,
+    targetToken?: string,
+    targetBrand?: RouterBrand
+  ) => {
+    try {
+      const ep =
+        targetEndpoint ||
+        (deviceInfo ? `${deviceInfo.protocol}://${deviceInfo.gatewayIp}:${deviceInfo.port}` : '');
+      const tok = targetToken !== undefined ? targetToken : sessionToken;
+      const brand = targetBrand || deviceInfo?.brand;
+      let realDevices: any[] = [];
+
+      if (brand && ep) {
+        const adapter = registry.getAdapter(brand);
+        if (adapter.fetchConnectedDevices) {
+          const devRes = await adapter.fetchConnectedDevices(ep, tok);
+          if (devRes && devRes.success && Array.isArray(devRes.devices)) {
+            realDevices = devRes.devices;
+          }
+        }
+      }
+
+      // If router returned 0 devices or adapter does not expose it, check system ARP discovery
+      if (realDevices.length === 0) {
+        if ((window as any).electronAPI?.routerApi) {
+          const arpRes = await (window as any).electronAPI.routerApi('getConnectedDevices');
+          if (arpRes && arpRes.success && Array.isArray(arpRes.devices)) {
+            realDevices = arpRes.devices;
+          }
+        } else {
+          const apiRes = await fetch('/api/router/quota/devices')
+            .then((r) => r.json())
+            .catch(() => null);
+          if (apiRes && apiRes.success && Array.isArray(apiRes.devices)) {
+            realDevices = apiRes.devices;
+          }
+        }
+      }
+
+      // Synchronize into the Quota Manager with replaceAll=true to erase any mock data
+      RouterQuotaManager.getInstance().syncRealDevices(realDevices, {
+        replaceAll: true,
+        source: 'router_admin_connect',
+      });
+
+      return realDevices;
+    } catch (err) {
+      console.warn('Real devices synchronization note:', err);
+      return [];
     }
   };
 
@@ -596,6 +666,9 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
         )}
       </div>
 
+      {/* WINDOWS WI-FI NETWORK SCANNER & WLAN PROFILE MANAGER (SCAN NETWORKS, ENTER PASSWORD & SAVE) */}
+      <WifiNetworkScanner />
+
       {/* Main Grid: Router Login & Capabilities on Left, Live Wi-Fi Controls on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Router Credentials & Supported Capabilities */}
@@ -670,6 +743,60 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
                 </span>
               </button>
             </div>
+          </div>
+
+          {/* Quick Data Quota & Billing Cycle Card */}
+          <div className="bg-[#0F1423] border border-[#1F293D] rounded-xl p-5 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Gauge className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-bold text-slate-100">Data Quota & Limits</h3>
+              </div>
+              <span className="text-[10px] bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 px-2 py-0.5 rounded-full font-semibold">
+                Manual Reset Only
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-bold font-mono text-white">
+                  {quotaDb.activeCycle.usedDataGB.toFixed(1)} GB
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  of {quotaDb.activeCycle.totalQuotaGB} GB ({quotaDb.activeCycle.usagePercent.toFixed(1)}%)
+                </span>
+              </div>
+
+              <div className="w-full h-2.5 bg-[#0B0F1A] rounded-full overflow-hidden border border-[#1F293D]">
+                <div
+                  className={`h-full ${
+                    quotaDb.activeCycle.usagePercent >= 100
+                      ? 'bg-rose-500'
+                      : quotaDb.activeCycle.usagePercent >= 90
+                      ? 'bg-amber-500'
+                      : quotaDb.activeCycle.usagePercent >= 80
+                      ? 'bg-yellow-500'
+                      : 'bg-cyan-500'
+                  } transition-all duration-300`}
+                  style={{ width: `${Math.min(100, Math.max(0, quotaDb.activeCycle.usagePercent))}%` }}
+                ></div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>
+                  Rem: <strong className="text-cyan-400 font-mono">{quotaDb.activeCycle.remainingDataGB.toFixed(1)} GB</strong>
+                </span>
+                <span>Cycle #{quotaDb.activeCycle.cycleNumber}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setActiveTab('quota')}
+              className="w-full py-1.5 px-3 bg-[#161B2A] hover:bg-[#1F293D] border border-[#1F293D] text-cyan-400 hover:text-cyan-300 rounded-lg text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+            >
+              <span>Manage Quotas & Reset</span>
+              <span>&rarr;</span>
+            </button>
           </div>
 
           {/* Supported Capabilities Inspection Card */}
@@ -765,6 +892,30 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
                 <span>Guest Wi-Fi Network</span>
               </button>
             )}
+
+            <button
+              onClick={() => setActiveTab('quota')}
+              className={`flex-1 py-2 rounded-lg font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                activeTab === 'quota'
+                  ? 'bg-[#0284C7] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#161B2A]'
+              }`}
+            >
+              <Gauge className="w-3.5 h-3.5" />
+              <span>Data Quota & Limits</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('parental')}
+              className={`flex-1 py-2 rounded-lg font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                activeTab === 'parental'
+                  ? 'bg-[#0284C7] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#161B2A]'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Parental & Web Filter</span>
+            </button>
 
             <button
               onClick={() => setActiveTab('direct')}
@@ -1228,11 +1379,90 @@ export const RouterManagementView: React.FC<RouterManagementViewProps> = () => {
                     </span>
                   </label>
                 </div>
+
+                {/* Guest Wi-Fi Data Quota & Bandwidth Limit */}
+                <div className="sm:col-span-2 pt-4 border-t border-[#1F293D] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wide">
+                        Guest Wi-Fi Data Quota & Limit
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Max GB allowance for the guest network. Never resets automatically; resets when administrator executes Reset Quota.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('quota')}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                    >
+                      Open Full Quota Console &rarr;
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-[#0B0F1A] p-3 rounded-lg border border-[#1F293D] text-xs">
+                    <div>
+                      <span className="text-[11px] text-slate-400 block mb-1">Configured Max Limit</span>
+                      <div className="flex items-center space-x-1.5">
+                        <input
+                          type="number"
+                          min="1"
+                          value={quotaDb.guestWifi.quotaLimitGB}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (val > 0) RouterQuotaManager.getInstance().updateGuestWifiConfig(val);
+                          }}
+                          className="w-20 px-2 py-1 bg-[#161B2A] border border-[#1F293D] rounded text-xs font-mono text-white outline-none"
+                        />
+                        <span className="text-slate-400 font-mono">GB</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[11px] text-slate-400 block mb-1">Current Usage</span>
+                      <span className="font-mono font-bold text-purple-400 text-sm">
+                        {quotaDb.guestWifi.usedDataGB.toFixed(2)} GB
+                      </span>
+                      <span className="text-slate-400 text-[10px] ml-1">
+                        ({quotaDb.guestWifi.usagePercent.toFixed(1)}%)
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[11px] text-slate-400 block mb-1">Remaining Allowance</span>
+                      <span className="font-mono font-bold text-slate-200 text-sm">
+                        {quotaDb.guestWifi.remainingDataGB.toFixed(2)} GB
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 3: POWERSHELL & DIRECT SCRIPT BRIDGE */}
+          {/* TAB 3: DATA QUOTA & BANDWIDTH MANAGEMENT */}
+          {activeTab === 'quota' && (
+            <RouterQuotaManagement
+              onNavigateToGuest={() => setActiveTab('guest')}
+              onNavigateToParental={() => setActiveTab('parental')}
+              routerConnectionStatus={connectionStatus}
+              routerDeviceInfo={deviceInfo}
+              sessionToken={sessionToken}
+              onConnectRouter={handleConnectAndAuthenticate}
+              onRefreshRouterDevices={() => fetchAndSyncRealDevices()}
+            />
+          )}
+
+          {/* TAB 4: PARENTAL CONTROL & WEB FILTERING */}
+          {activeTab === 'parental' && (
+            <RouterParentalControl
+              routerDeviceInfo={deviceInfo}
+              sessionToken={sessionToken}
+              connectedDevices={quotaDb.connectedDevices}
+            />
+          )}
+
+          {/* TAB 5: POWERSHELL & DIRECT SCRIPT BRIDGE */}
           {activeTab === 'direct' && (
             <div className="bg-[#0F1423] border border-[#1F293D] rounded-xl p-5 shadow-lg space-y-4">
               <div className="flex items-center justify-between border-b border-[#1F293D] pb-3">
