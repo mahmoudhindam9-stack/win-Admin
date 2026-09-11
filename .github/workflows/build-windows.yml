@@ -58,15 +58,18 @@ jobs:
             $shouldRelease = $true
           } elseif ('${{ github.ref }}' -eq 'refs/heads/main') {
             gh release view "v$version" --repo mahmoudhindam9-stack/win-Admin 2>$null
-            if ($LASTEXITCODE -ne 0) {
+            $releaseLookupExitCode = $LASTEXITCODE
+            if ($releaseLookupExitCode -ne 0) {
               $shouldRelease = $true
             } else {
               Write-Host "Release v$version already exists; build will not publish a duplicate."
             }
+            $global:LASTEXITCODE = 0
           }
 
           "should_release=$($shouldRelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "should_release=$shouldRelease"
+          $global:LASTEXITCODE = 0
 
       - name: Generate branded installer artwork
         shell: pwsh
