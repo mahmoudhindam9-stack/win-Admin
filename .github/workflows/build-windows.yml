@@ -57,21 +57,11 @@ jobs:
           if ('${{ github.ref_type }}' -eq 'tag') {
             $shouldRelease = $true
           } elseif ('${{ github.ref }}' -eq 'refs/heads/main') {
-            try {
-              $previousJson = git show HEAD^:package.json | ConvertFrom-Json
-              if ($previousJson.version -ne $version) {
-                $shouldRelease = $true
-              }
-            } catch {
-              Write-Host 'No previous package.json found; treating this as non-release.'
-            }
-          }
-
-          if ($shouldRelease) {
             gh release view "v$version" --repo mahmoudhindam9-stack/win-Admin 2>$null
-            if ($LASTEXITCODE -eq 0) {
+            if ($LASTEXITCODE -ne 0) {
+              $shouldRelease = $true
+            } else {
               Write-Host "Release v$version already exists; build will not publish a duplicate."
-              $shouldRelease = $false
             }
           }
 
