@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('execution-progress', handler);
   },
   routerApi: (action, data) => ipcRenderer.invoke('router-api', action, data),
+  wifiApi: (action, data) => ipcRenderer.invoke('wifi-api', action, data),
   checkForUpdate: () => ipcRenderer.invoke('update-check'),
   downloadUpdate: () => ipcRenderer.invoke('update-download'),
   installUpdate: () => ipcRenderer.invoke('update-install'),
