@@ -526,40 +526,26 @@ if ($EnableVisualTweaks) {
 
 # ==============================================================================
 # SUMMARY REPORT
-# ==============================================================================
 $EndTime = Get-Date
 $Duration = [math]::Round(($EndTime - $StartTime).TotalSeconds, 1)
 $TotalFreedMB = [math]::Round($Global:TotalBytesFreed / 1MB, 2)
 $TotalFreedGB = [math]::Round($Global:TotalBytesFreed / 1GB, 3)
-
 Write-Host ""
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host "                   OPTIMIZATION EXECUTION SUMMARY REPORT                        " -ForegroundColor White
 Write-Host "================================================================================" -ForegroundColor Cyan
-
-$report = [PSCustomObject]@{
-    "Execution Status"     = if ($Global:ErrorsLogged -eq 0) { "Completed Successfully" } else { "Completed with Warnings/Errors" }
-    "Estimated Space Freed"= if ($TotalFreedMB -gt 1024) { "$TotalFreedGB GB ($TotalFreedMB MB)" } else { "$TotalFreedMB MB" }
-    "Total Files Deleted"  = $Global:TotalFilesRemoved
-    "Locked Files Skipped" = $Global:TotalLockedFiles
-    "Memory RAM Released"  = "$($Global:MemoryFreedMB) MB"
-    "Tasks Completed"      = $Global:TasksCompleted
-    "Tasks Skipped"        = $Global:TasksSkipped
-    "Warnings Logged"      = $Global:WarningsLogged
-    "Errors Logged"        = $Global:ErrorsLogged
-    "Total Duration"       = "$Duration seconds"
-    "Reboot Recommended"   = if ($Global:RequiresReboot) { "YES (Network stack was reset)" } else { "No reboot necessary" }
-}
-
-$report | Format-List | Out-String | Write-Host -ForegroundColor Green
-
-Write-Host "WIN_OPT_RESULT_JSON:{\`"filesDeleted\`":$Global:TotalFilesRemoved,\`"spaceFreedMB\`":$TotalFreedMB,\`"memoryFreedMB\`":$Global:MemoryFreedMB,\`"lockedFilesSkipped\`":$Global:TotalLockedFiles,\`"tasksCompleted\`":$Global:TasksCompleted,\`"tasksSkipped\`":$Global:TasksSkipped,\`"warningsLogged\`":$Global:WarningsLogged,\`"errorsLogged\`":$Global:ErrorsLogged}"
-
-Write-Host "--------------------------------------------------------------------------------" -ForegroundColor DarkCyan
+Write-Host "Execution Status : " -NoNewline -ForegroundColor Gray
+Write-Host $(if ($Global:ErrorsLogged -eq 0) { "Completed Successfully" } else { "Completed with Warnings/Errors" }) -ForegroundColor Green
+Write-Host "Estimated Space Freed: $TotalFreedMB MB" -ForegroundColor Green
+Write-Host "Tasks Completed: $Global:TasksCompleted" -ForegroundColor Green
+Write-Host "Tasks Skipped: $Global:TasksSkipped" -ForegroundColor Gray
+Write-Host "Warnings Logged: $Global:WarningsLogged" -ForegroundColor Yellow
+Write-Host "Errors Logged: $Global:ErrorsLogged" -ForegroundColor $(if ($Global:ErrorsLogged -eq 0) { "Green" } else { "Red" })
+Write-Host "Total Duration: $Duration seconds" -ForegroundColor Gray
 if ($Global:RequiresReboot) {
-    Write-Host "[!] REBOOT RECOMMENDATION: Please reboot your system to complete network stack rebuild." -ForegroundColor Yellow
+    Write-Host "REBOOT RECOMMENDED: Network stack was reset." -ForegroundColor Yellow
 } else {
-    Write-Host "[\u2713] Windows optimization completed safely. No system restart is required." -ForegroundColor Green
+    Write-Host "Windows optimization completed. No restart is required." -ForegroundColor Green
 }
 Write-Host "================================================================================" -ForegroundColor Cyan
 `;

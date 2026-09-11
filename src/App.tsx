@@ -78,9 +78,6 @@ export default function App() {
           setIsElevated(elevated);
           if (elevated) {
             setIsAuthorized(true);
-          } else if (window.electronAPI.isSessionAuthorized) {
-            const authorized = await window.electronAPI.isSessionAuthorized();
-            setIsAuthorized(authorized);
           }
 
           const realMetrics = await window.electronAPI.getSystemMetrics();
@@ -126,15 +123,9 @@ export default function App() {
 
   // Handler: When user clicks ANY action button in Admin Dashboard
   // Authorization is requested ONLY ONCE on the first command; subsequent commands run directly!
-  const handleSelectTask = async (task: OptimizationTaskInfo) => {
+  const handleSelectTask = (task: OptimizationTaskInfo) => {
     setSelectedTask(task);
-    let authorized = isAuthorized || isElevated;
-    if (!authorized && window.electronAPI?.isSessionAuthorized) {
-      try {
-        authorized = await window.electronAPI.isSessionAuthorized();
-        if (authorized) setIsAuthorized(true);
-      } catch (_) {}
-    }
+    const authorized = isAuthorized || isElevated;
 
     if (!authorized) {
       // First command only: prompt for PowerShell authorization
@@ -149,16 +140,9 @@ export default function App() {
 
   // Handler: User clicks "Approve & Elevate" in UAC dialog
   // Grabs persistent PowerShell session authorization once for all commands!
-  const handleApproveUAC = async (task: OptimizationTaskInfo) => {
+  const handleApproveUAC = (task: OptimizationTaskInfo) => {
     setIsUACModalOpen(false);
     setIsAuthorized(true);
-    if (window.electronAPI?.requestAuthorization) {
-      try {
-        await window.electronAPI.requestAuthorization();
-      } catch (err) {
-        console.warn("Session authorization:", err);
-      }
-    }
     setIsExecuting(true);
     setAutoStartTerminal(true);
     setActiveView('terminal');
